@@ -1,0 +1,175 @@
+{
+  "entities": {
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "User profile information and display preferences",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "description": "Firebase Auth user ID" },
+        "displayName": { "type": "string", "maxLength": 100, "description": "Display name of the user" },
+        "email": { "type": "string", "format": "email", "maxLength": 120, "description": "Email address" },
+        "photoURL": { "type": "string", "maxLength": 500, "description": "Avatar photo URL" },
+        "preferredUnits": { "type": "string", "enum": ["metric", "imperial"], "description": "Measurement units" },
+        "createdAt": { "type": "string", "format": "date-time", "description": "Profile creation timestamp" },
+        "updatedAt": { "type": "string", "format": "date-time", "description": "Profile last update timestamp" }
+      },
+      "required": ["uid", "email", "createdAt", "updatedAt"]
+    },
+    "UserRole": {
+      "title": "UserRole",
+      "description": "Protected privileged role assignment (user, pro, admin)",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "description": "User ID" },
+        "role": { "type": "string", "enum": ["user", "pro", "admin"], "description": "Privileged role" },
+        "grantedAt": { "type": "string", "format": "date-time", "description": "Role grant timestamp" },
+        "grantedBy": { "type": "string", "description": "Admin UID who granted the role or system bootstrap" }
+      },
+      "required": ["uid", "role", "grantedAt", "grantedBy"]
+    },
+    "PairedDevice": {
+      "title": "PairedDevice",
+      "description": "Paired LG webOS TV device linked to an owner account",
+      "type": "object",
+      "properties": {
+        "deviceUid": { "type": "string", "description": "Unique device hardware identifier or anonymous UID" },
+        "deviceName": { "type": "string", "maxLength": 80, "description": "Human-readable device name" },
+        "pairedAt": { "type": "string", "format": "date-time", "description": "Pairing completion timestamp" },
+        "lastSeenAt": { "type": "string", "format": "date-time", "description": "Last TV ping timestamp" },
+        "active": { "type": "boolean", "description": "Whether device pairing is currently active" },
+        "lastPairingSessionId": { "type": "string", "description": "Reference to the pairing session" }
+      },
+      "required": ["deviceUid", "deviceName", "pairedAt", "active"]
+    },
+    "PairingSession": {
+      "title": "PairingSession",
+      "description": "Temporary 2-minute QR code pairing session created by TV and claimed by user",
+      "type": "object",
+      "properties": {
+        "sessionId": { "type": "string", "description": "One-time session ID" },
+        "deviceUid": { "type": "string", "description": "TV device anonymous UID or hardware ID" },
+        "deviceName": { "type": "string", "maxLength": 80, "description": "TV device display name" },
+        "status": { "type": "string", "enum": ["pending", "paired", "expired", "revoked"], "description": "Session status" },
+        "createdAt": { "type": "string", "format": "date-time", "description": "Creation timestamp" },
+        "expiresAt": { "type": "string", "format": "date-time", "description": "Expiration timestamp (approx 2 minutes)" },
+        "pairedByUid": { "type": "string", "description": "UID of the user who claimed this session" },
+        "pairedAt": { "type": "string", "format": "date-time", "description": "Claim timestamp" }
+      },
+      "required": ["sessionId", "deviceUid", "deviceName", "status", "createdAt", "expiresAt"]
+    },
+    "Exercise": {
+      "title": "Exercise",
+      "description": "Exercise catalogue entry with animation media URL and muscle/equipment metadata",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Exercise document ID" },
+        "name": { "type": "string", "maxLength": 100, "description": "Exercise name" },
+        "slug": { "type": "string", "maxLength": 100, "description": "URL slug" },
+        "description": { "type": "string", "maxLength": 1000, "description": "Exercise description" },
+        "primaryMuscles": { "type": "array", "description": "Primary muscles targeted" },
+        "secondaryMuscles": { "type": "array", "description": "Secondary muscles targeted" },
+        "equipment": { "type": "string", "maxLength": 60, "description": "Required equipment" },
+        "difficulty": { "type": "string", "enum": ["beginner", "intermediate", "advanced"], "description": "Difficulty level" },
+        "instructions": { "type": "array", "description": "Step-by-step instructions" },
+        "mediaUrl": { "type": "string", "maxLength": 1000, "pattern": "^https?://.+", "description": "HTTPS animation or video URL" },
+        "mediaType": { "type": "string", "enum": ["video/mp4", "image/gif", "image/svg+xml"], "description": "MIME type of media" },
+        "posterUrl": { "type": "string", "maxLength": 1000, "description": "Static poster image URL" },
+        "durationSeconds": { "type": "number", "description": "Approximate loop or clip duration" },
+        "loop": { "type": "boolean", "description": "Whether media loops continuously" },
+        "sourceUrl": { "type": "string", "maxLength": 1000, "description": "Upstream source or repository URL" },
+        "licenceName": { "type": "string", "maxLength": 80, "description": "License name (e.g. Creative Commons, MIT, Public Domain)" },
+        "attributionText": { "type": "string", "maxLength": 500, "description": "Author attribution and credit" },
+        "status": { "type": "string", "enum": ["draft", "published", "archived"], "description": "Publication status" },
+        "createdAt": { "type": "string", "format": "date-time", "description": "Creation timestamp" },
+        "updatedAt": { "type": "string", "format": "date-time", "description": "Update timestamp" },
+        "createdBy": { "type": "string", "description": "Creator UID" },
+        "updatedBy": { "type": "string", "description": "Updater UID" }
+      },
+      "required": ["id", "name", "difficulty", "mediaUrl", "mediaType", "status", "createdAt", "updatedAt"]
+    },
+    "Routine": {
+      "title": "Routine",
+      "description": "Structured workout routine composed of exercise items",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Routine document ID" },
+        "ownerUid": { "type": "string", "description": "Pro user or admin UID owner" },
+        "name": { "type": "string", "maxLength": 100, "description": "Routine name" },
+        "description": { "type": "string", "maxLength": 1000, "description": "Routine description" },
+        "category": { "type": "string", "maxLength": 60, "description": "Category (Strength, Cardio, HIIT, Mobility, Core)" },
+        "difficulty": { "type": "string", "enum": ["beginner", "intermediate", "advanced"], "description": "Difficulty rating" },
+        "estimatedDurationSeconds": { "type": "number", "description": "Computed total duration in seconds" },
+        "visibility": { "type": "string", "enum": ["private", "public"], "description": "Routine visibility" },
+        "status": { "type": "string", "enum": ["draft", "published", "archived"], "description": "Routine status" },
+        "items": { "type": "array", "description": "Ordered exercise sequence items" },
+        "createdAt": { "type": "string", "format": "date-time", "description": "Creation timestamp" },
+        "updatedAt": { "type": "string", "format": "date-time", "description": "Update timestamp" }
+      },
+      "required": ["id", "ownerUid", "name", "visibility", "status", "items", "createdAt", "updatedAt"]
+    },
+    "Banner": {
+      "title": "Banner",
+      "description": "Temporary banner shown in TV home screen top slot",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Banner ID" },
+        "title": { "type": "string", "maxLength": 120, "description": "Headline title" },
+        "imageUrl": { "type": "string", "maxLength": 1000, "pattern": "^https?://.+", "description": "HTTPS banner artwork URL" },
+        "linkUrl": { "type": "string", "maxLength": 1000, "description": "Optional deep link URL or route" },
+        "active": { "type": "boolean", "description": "Admin enable switch" },
+        "startAt": { "type": "string", "format": "date-time", "description": "Scheduled display start" },
+        "endAt": { "type": "string", "format": "date-time", "description": "Scheduled display end" },
+        "priority": { "type": "number", "description": "Priority weight (highest displayed first)" },
+        "createdAt": { "type": "string", "format": "date-time", "description": "Creation timestamp" },
+        "updatedAt": { "type": "string", "format": "date-time", "description": "Update timestamp" },
+        "createdBy": { "type": "string", "description": "Admin UID" }
+      },
+      "required": ["id", "title", "imageUrl", "active", "priority", "createdAt", "updatedAt"]
+    },
+    "ApplicationSetting": {
+      "title": "ApplicationSetting",
+      "description": "Global public application configuration",
+      "type": "object",
+      "properties": {
+        "appVersion": { "type": "string", "description": "Client app version" },
+        "defaultBannerFallback": { "type": "string", "description": "Default banner image URL" },
+        "pairingTimeoutSeconds": { "type": "number", "description": "Pairing window in seconds" }
+      },
+      "required": ["appVersion"]
+    }
+  },
+  "firestore": {
+    "/userProfiles/{uid}": {
+      "schema": "UserProfile",
+      "description": "User profile records accessible by owner and admins"
+    },
+    "/userRoles/{uid}": {
+      "schema": "UserRole",
+      "description": "Role records (user, pro, admin). Read by owner/admin, writable only by admin."
+    },
+    "/users/{uid}/pairedDevices/{deviceUid}": {
+      "schema": "PairedDevice",
+      "description": "Linked LG webOS TV devices"
+    },
+    "/pairingSessions/{sessionId}": {
+      "schema": "PairingSession",
+      "description": "Temporary 2-minute pairing handshake records"
+    },
+    "/exercises/{exerciseId}": {
+      "schema": "Exercise",
+      "description": "Exercise library with animations and attribution"
+    },
+    "/routines/{routineId}": {
+      "schema": "Routine",
+      "description": "Workouts created by pro users and admins"
+    },
+    "/banners/{bannerId}": {
+      "schema": "Banner",
+      "description": "Temporary marketing / notification banners for TV slot"
+    },
+    "/applicationSettings/public": {
+      "schema": "ApplicationSetting",
+      "description": "Non-sensitive public system configuration"
+    }
+  }
+}

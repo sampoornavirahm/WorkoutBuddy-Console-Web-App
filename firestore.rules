@@ -1,0 +1,179 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Default deny catch-all
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // --- Helper Functions ---
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(uid) {
+      return isSignedIn() && request.auth.uid == uid;
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() > 0 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    // Role check functions
+    // Checks userRoles/{uid} doc or bootstrapped project administrator email
+    function isAdmin() {
+      return isSignedIn() && (
+        (request.auth.token.email == "jcob1289@gmail.com" && request.auth.token.email_verified == true) ||
+        (exists(/databases/$(database)/documents/userRoles/$(request.auth.uid)) &&
+         get(/databases/$(database)/documents/userRoles/$(request.auth.uid)).data.role == 'admin')
+      );
+    }
+
+    function isPro() {
+      return isSignedIn() && (
+        isAdmin() ||
+        (exists(/databases/$(database)/documents/userRoles/$(request.auth.uid)) &&
+         get(/databases/$(database)/documents/userRoles/$(request.auth.uid)).data.role in ['pro', 'admin'])
+      );
+    }
+
+    // Paired device check: checks if device is linked under users/{ownerUid}/pairedDevices/{deviceUid}
+    function isPairedDeviceOfOwner(ownerUid) {
+      return isSignedIn() &&
+        exists(/databases/$(database)/documents/users/$(ownerUid)/pairedDevices/$(request.auth.uid)) &&
+        get(/databases/$(database)/documents/users/$(ownerUid)/pairedDevices/$(request.auth.uid)).data.active == true;
+    }
+
+    // Validation blueprints
+    function isValidProfile(data, uid) {
+      return data.uid == uid &&
+        data.email is string &&
+        data.email.size() <= 120 &&
+        (!('displayName' in data) || (data.displayName is string && data.displayName.size() <= 100)) &&
+        (!('preferredUnits' in data) || (data.preferredUnits in ['metric', 'imperial'])) &&
+        (!('role' in data)); // Users can NEVER write their own role in userProfiles
+    }
+
+    function isValidExercise(data) {
+      return data.name is string && data.name.size() > 0 && data.name.size() <= 100 &&
+        data.difficulty in ['beginner', 'intermediate', 'advanced'] &&
+        data.mediaUrl is string && data.mediaUrl.size() <= 1000 && data.mediaUrl.matches('^https?://.+') &&
+        data.mediaType in ['video/mp4', 'image/gif', 'image/svg+xml'] &&
+        data.status in ['draft', 'published', 'archived'];
+    }
+
+    function isValidRoutine(data) {
+      return data.name is string && data.name.size() > 0 && data.name.size() <= 100 &&
+        data.ownerUid is string &&
+        data.visibility in ['private', 'public'] &&
+        data.status in ['draft', 'published', 'archived'] &&
+        data.items is list && data.items.size() <= 100;
+    }
+
+    function isValidBanner(data) {
+      return data.title is string && data.title.size() > 0 && data.title.size() <= 120 &&
+        data.imageUrl is string && data.imageUrl.size() <= 1000 && data.imageUrl.matches('^https?://.+') &&
+        data.active is bool &&
+        data.priority is number;
+    }
+
+    // --- Collections ---
+
+    // 1. User Profiles: Safe personal profile preferences
+    match /userProfiles/{uid} {
+      allow get: if isOwner(uid) || isAdmin();
+      allow list: if isAdmin();
+      allow create: if isOwner(uid) && isValidProfile(incoming(), uid);
+      allow update: if (isOwner(uid) && isValidProfile(incoming(), uid)) || isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    // 2. User Roles: Privileged role records (user, pro, admin). Read by owner/admin, written ONLY by admin.
+    match /userRoles/{uid} {
+      allow get: if isOwner(uid) || isAdmin();
+      allow list: if isAdmin();
+      allow create, update: if isAdmin() &&
+        incoming().role in ['user', 'pro', 'admin'] &&
+        incoming().uid == uid;
+      allow delete: if isAdmin();
+    }
+
+    // 3. User Paired Devices: Linked LG webOS TVs
+    match /users/{uid}/pairedDevices/{deviceUid} {
+      allow get: if isOwner(uid) || isAdmin() || (isSignedIn() && request.auth.uid == deviceUid);
+      allow list: if isOwner(uid) || isAdmin();
+      allow create, update: if isOwner(uid) || isAdmin();
+      allow delete: if isOwner(uid) || isAdmin();
+    }
+
+    // 4. Pairing Sessions: 2-minute handshake sessions
+    match /pairingSessions/{sessionId} {
+      allow get, list: if true;
+      allow create: if isValidId(sessionId) &&
+        incoming().status == 'pending' &&
+        incoming().deviceUid is string &&
+        incoming().deviceName is string &&
+        incoming().createdAt is string &&
+        incoming().expiresAt is string;
+      allow update: if
+        // Case 1: Authenticated web user claiming the pending unexpired session
+        (isSignedIn() &&
+         existing().status == 'pending' &&
+         incoming().status == 'paired' &&
+         incoming().pairedByUid == request.auth.uid &&
+         incoming().deviceUid == existing().deviceUid) ||
+        // Case 2: TV or user marking as expired/revoked
+        (incoming().status in ['expired', 'revoked']) ||
+        isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    // 5. Exercise Catalogue: Published library readable by all / TV; manageable by admin
+    match /exercises/{exerciseId} {
+      allow get: if resource.data.status == 'published' || isPro() || isAdmin();
+      allow list: if resource.data.status == 'published' || isPro() || isAdmin();
+      allow create, update: if isAdmin() && isValidExercise(incoming());
+      allow delete: if isAdmin();
+    }
+
+    // 6. Workout Routines: Pro/Admin authored workouts
+    match /routines/{routineId} {
+      allow get: if resource.data.visibility == 'public' ||
+                   (isSignedIn() && (resource.data.ownerUid == request.auth.uid || isAdmin())) ||
+                   isPairedDeviceOfOwner(resource.data.ownerUid);
+      allow list: if resource.data.visibility == 'public' ||
+                    (isSignedIn() && (resource.data.ownerUid == request.auth.uid || isAdmin()));
+      allow create: if isPro() &&
+                      incoming().ownerUid == request.auth.uid &&
+                      isValidRoutine(incoming());
+      allow update: if (isPro() &&
+                       resource.data.ownerUid == request.auth.uid &&
+                       incoming().ownerUid == existing().ownerUid &&
+                       isValidRoutine(incoming())) ||
+                      (isAdmin() && isValidRoutine(incoming()));
+      allow delete: if (isPro() && resource.data.ownerUid == request.auth.uid) || isAdmin();
+    }
+
+    // 7. Temporary TV Banners: Displayed on LG webOS Home Screen
+    match /banners/{bannerId} {
+      allow get, list: if true;
+      allow create, update: if isAdmin() && isValidBanner(incoming());
+      allow delete: if isAdmin();
+    }
+
+    // 8. Application Settings: Read-only public parameters
+    match /applicationSettings/{settingId} {
+      allow get, list: if true;
+      allow write: if isAdmin();
+    }
+  }
+}

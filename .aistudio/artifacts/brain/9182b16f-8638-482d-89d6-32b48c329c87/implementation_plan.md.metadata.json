@@ -1,0 +1,6 @@
+{
+  "summary":  "Implementation plan for the Workout Companion Web Manager, covering Spark-compatible Firebase Firestore architecture, RBAC (user, pro, admin), TV pairing flow, exercise catalogue, routine builder, banner manager, and security rules.",
+  "updatedAt":  "2026-10-26T11:25:28.560568092Z",
+  "requestFeedback":  true,
+  "userFacing":  true
+}
