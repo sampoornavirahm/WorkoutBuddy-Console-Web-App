@@ -1,0 +1,9 @@
+{
+  "projects": {
+    "workoutbuddy": "modular-wallaby-xv4kj",
+    "workoutbuddyweb": "workoutbuddyweb",
+    "default": "workoutbuddyweb"
+  },
+  "targets": {},
+  "etags": {}
+}

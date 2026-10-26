@@ -1,6 +1,5 @@
 {
   "hosting": {
-    "site": "workoutbuddyconsole",
     "public": "dist",
     "ignore": [
       "firebase.json",
