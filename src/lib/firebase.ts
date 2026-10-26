@@ -16,7 +16,7 @@ const app = getApps().length === 0 ? initializeApp(resolvedConfig) : getApp();
 const dbId = import.meta.env.VITE_FIREBASE_FIRESTORE_DATABASE_ID || firebaseConfig.firestoreDatabaseId;
 
 export const auth = getAuth(app);
-export const db = dbId && dbId !== '(default)' ? getFirestore(app, dbId) : getFirestore(app);
+export const db = getFirestore(app);
 
 // Test Firestore connection on boot as mandated by the Firebase skill
 async function testConnection() {

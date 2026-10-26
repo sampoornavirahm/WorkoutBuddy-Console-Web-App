@@ -36,6 +36,11 @@ export const ExerciseManagerView: React.FC = () => {
   const [selectedMuscle, setSelectedMuscle] = useState<string>('all');
   const [selectedDifficulty, setSelectedDifficulty] = useState<string>('all');
   const [previewExercise, setPreviewExercise] = useState<Exercise | null>(null);
+  const [displayLimit, setDisplayLimit] = useState(36);
+
+  useEffect(() => {
+    setDisplayLimit(36);
+  }, [searchQuery, selectedMuscle, selectedDifficulty]);
 
   // Editor Modal State (Admin)
   const [isEditorOpen, setIsEditorOpen] = useState(false);
@@ -254,6 +259,7 @@ export const ExerciseManagerView: React.FC = () => {
   });
 
   const allMuscles = Array.from(new Set(exercises.flatMap(e => e.primaryMuscles))).sort();
+  const displayedExercises = filteredExercises.slice(0, displayLimit);
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-6">
@@ -352,7 +358,7 @@ export const ExerciseManagerView: React.FC = () => {
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {filteredExercises.map((exercise) => (
+          {displayedExercises.map((exercise) => (
             <div
               key={exercise.id}
               className="bg-white border border-[#E6E4DF] hover:border-[#D1CFCA] rounded-xl overflow-hidden flex flex-col transition-all hover:shadow-xs group"
@@ -565,7 +571,7 @@ export const ExerciseManagerView: React.FC = () => {
                 <span>Pre-populate from Curated Open-Source Library</span>
               </div>
               <div className="flex flex-wrap gap-2 pt-1">
-                {CURATED_EXERCISES.map((cur, idx) => (
+                {CURATED_EXERCISES.slice(0, 16).map((cur, idx) => (
                   <button
                     key={cur.slug}
                     type="button"

@@ -360,10 +360,17 @@ async function main() {
 
   const now = new Date().toISOString();
 
-  // 1. Seed Curated Exercises
-  console.log(`\n[1/4] Migrating & Seeding ${CURATED_EXERCISES.length} Curated Exercises...`);
-  for (const ex of CURATED_EXERCISES) {
-    const id = `curated_${ex.slug}`;
+  // 1. Seed Exercises (Full Dataset or Curated)
+  let exerciseList = CURATED_EXERCISES;
+  const datasetFile = path.resolve(process.cwd(), 'src/data/exercisesDataset.json');
+  if (fs.existsSync(datasetFile)) {
+    try {
+      exerciseList = JSON.parse(fs.readFileSync(datasetFile, 'utf8'));
+    } catch(e) {}
+  }
+  console.log(`\n[1/4] Migrating & Seeding ${exerciseList.length} Exercises...`);
+  for (const ex of exerciseList) {
+    const id = ex.id || (`curated_${ex.slug}`);
     const payload = {
       ...ex,
       id,
