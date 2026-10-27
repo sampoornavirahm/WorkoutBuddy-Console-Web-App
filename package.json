@@ -10,7 +10,8 @@
     "clean": "rm -rf dist server.js",
     "lint": "tsc --noEmit",
     "emulators": "firebase emulators:start --only firestore,auth,hosting",
-    "test:rules": "firebase emulators:exec --only firestore 'echo Running firestore rules test suite'"
+    "test:rules": "firebase emulators:exec --only firestore 'echo Running firestore rules test suite'",
+    "migrate": "node scripts/seed-new-project.mjs"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",
