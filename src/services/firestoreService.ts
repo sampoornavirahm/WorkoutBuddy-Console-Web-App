@@ -9,7 +9,8 @@ import {
   query,
   where,
   orderBy,
-  runTransaction
+  runTransaction,
+  writeBatch
 } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType } from '../lib/firebase';
 import {
@@ -22,7 +23,7 @@ import {
   Routine,
   Banner
 } from '../types';
-import { CURATED_EXERCISES } from '../data/curatedExercises';
+import { CURATED_EXERCISES, ALL_DATASET_EXERCISES, resolveExerciseMedia } from '../data/curatedExercises';
 
 // --- Profiles ---
 export async function getUserProfile(uid: string): Promise<UserProfile | null> {
@@ -135,15 +136,30 @@ export async function removePairedDevice(uid: string, deviceUid: string): Promis
   }
 }
 
-// --- QR Pairing Handshake (Atomic 2-minute session) ---
-export async function createPairingSession(deviceName = 'LG OLED C3 (webOS TV)'): Promise<PairingSession> {
-  const sessionId = 'tv_' + Math.random().toString(36).substring(2, 10) + Math.random().toString(36).substring(2, 6);
-  const deviceUid = 'dev_' + Math.random().toString(36).substring(2, 12);
+// --- 8-Digit Alphanumeric QR & Pairing Handshake ---
+export function generatePairingCode(): string {
+  // 8 uppercase alphanumeric chars, avoiding ambiguous chars like 0/O, 1/I/L
+  const chars = '23456789ABCDEFGHJKLMNPQRSTUVWXYZ';
+  let code = '';
+  for (let i = 0; i < 8; i++) {
+    code += chars.charAt(Math.floor(Math.random() * chars.length));
+  }
+  return code;
+}
+
+export async function createPairingSession(
+  deviceName = 'LG OLED C3 (webOS TV)',
+  customDeviceUid?: string
+): Promise<PairingSession> {
+  const pairingCode = generatePairingCode();
+  const sessionId = pairingCode; // 8-digit alphanumeric document ID
+  const deviceUid = customDeviceUid || 'dev_' + Math.random().toString(36).substring(2, 12);
   const now = new Date();
-  const expiresAt = new Date(now.getTime() + 2 * 60 * 1000); // 2 minutes
+  const expiresAt = new Date(now.getTime() + 10 * 60 * 1000); // 10 minutes for convenient pairing
 
   const session: PairingSession = {
     sessionId,
+    pairingCode,
     deviceUid,
     deviceName,
     status: 'pending',
@@ -160,22 +176,54 @@ export async function createPairingSession(deviceName = 'LG OLED C3 (webOS TV)')
   }
 }
 
-export async function getPairingSession(sessionId: string): Promise<PairingSession | null> {
-  const path = `pairingSessions/${sessionId}`;
+export async function getPairingSession(codeOrSessionId: string): Promise<PairingSession | null> {
+  const normalized = codeOrSessionId.trim().toUpperCase().replace(/[^A-Z0-9_]/g, '');
+  if (!normalized) return null;
+
+  // 1. Direct getDoc by normalized ID (O(1))
   try {
-    const snap = await getDoc(doc(db, 'pairingSessions', sessionId));
+    const snap = await getDoc(doc(db, 'pairingSessions', normalized));
     if (snap.exists()) {
       return snap.data() as PairingSession;
     }
-    return null;
   } catch (error) {
-    handleFirestoreError(error, OperationType.GET, path);
+    console.warn('Direct lookup error for pairing session:', error);
   }
+
+  // 2. Query by pairingCode field in case doc had an alternate id format
+  try {
+    const q = query(collection(db, 'pairingSessions'), where('pairingCode', '==', normalized));
+    const snap = await getDocs(q);
+    if (!snap.empty) {
+      return snap.docs[0].data() as PairingSession;
+    }
+  } catch (error) {
+    console.warn('Pairing code query error:', error);
+  }
+
+  return null;
 }
 
-export async function claimPairingSession(sessionId: string, userUid: string): Promise<PairedDevice> {
-  const sessionRef = doc(db, 'pairingSessions', sessionId);
+export async function claimPairingSession(
+  codeOrSessionId: string,
+  userUid: string,
+  userProfile?: { email?: string; displayName?: string; photoURL?: string; role?: string }
+): Promise<{ pairedDevice: PairedDevice; session: PairingSession }> {
+  const session = await getPairingSession(codeOrSessionId);
+  if (!session) {
+    throw new Error('Pairing session not found. Please check the 8-digit pairing ID.');
+  }
+
+  const sessionRef = doc(db, 'pairingSessions', session.sessionId);
   const now = new Date().toISOString();
+  const userAccount = {
+    uid: userUid,
+    email: userProfile?.email || '',
+    displayName: userProfile?.displayName || userProfile?.email?.split('@')[0] || 'Athlete',
+    photoURL: userProfile?.photoURL || '',
+    role: userProfile?.role || 'user',
+    pairedAt: now,
+  };
 
   try {
     return await runTransaction(db, async (txn) => {
@@ -183,62 +231,90 @@ export async function claimPairingSession(sessionId: string, userUid: string): P
       if (!snap.exists()) {
         throw new Error('Pairing session not found.');
       }
-      const session = snap.data() as PairingSession;
-      if (session.status !== 'pending') {
-        throw new Error(`This pairing session has already been ${session.status}.`);
+      const current = snap.data() as PairingSession;
+      if (current.status !== 'pending') {
+        throw new Error(`This TV pairing session has already been ${current.status}.`);
       }
-      if (new Date(session.expiresAt).getTime() < Date.now()) {
+      if (new Date(current.expiresAt).getTime() < Date.now()) {
         txn.update(sessionRef, { status: 'expired' });
-        throw new Error('This pairing session has expired. Please refresh the QR code on your TV.');
+        throw new Error('This pairing session has expired. Please refresh the code on your TV.');
       }
 
-      // Mark session as paired
+      // Mark session as paired with full user account for TV client permanent login
       txn.update(sessionRef, {
         status: 'paired',
         pairedByUid: userUid,
         pairedAt: now,
+        userAccount,
       });
 
-      // Record device under users/{uid}/pairedDevices/{deviceUid}
-      const deviceRef = doc(db, 'users', userUid, 'pairedDevices', session.deviceUid);
+      // Record device permanently under users/{uid}/pairedDevices/{deviceUid}
+      const deviceRef = doc(db, 'users', userUid, 'pairedDevices', current.deviceUid);
       const pairedDevice: PairedDevice = {
-        deviceUid: session.deviceUid,
-        deviceName: session.deviceName,
+        deviceUid: current.deviceUid,
+        deviceName: current.deviceName,
         pairedAt: now,
         lastSeenAt: now,
         active: true,
-        lastPairingSessionId: sessionId,
+        lastPairingSessionId: current.sessionId,
+        pairingCode: current.pairingCode,
+        userEmail: userAccount.email,
       };
       txn.set(deviceRef, pairedDevice);
 
-      return pairedDevice;
+      const updatedSession: PairingSession = {
+        ...current,
+        status: 'paired',
+        pairedByUid: userUid,
+        pairedAt: now,
+        userAccount,
+      };
+
+      return { pairedDevice, session: updatedSession };
     });
   } catch (error) {
-    handleFirestoreError(error, OperationType.UPDATE, `pairingSessions/${sessionId}`);
+    handleFirestoreError(error, OperationType.UPDATE, `pairingSessions/${session.sessionId}`);
   }
 }
 
 // --- Exercises ---
 export async function getExercises(): Promise<Exercise[]> {
-  const path = 'exercises';
   try {
     const snap = await getDocs(collection(db, 'exercises'));
-    if (snap.empty) {
-      // Seed default curated catalogue on first launch so user has working data
-      await seedDefaultCuratedExercises();
-      const reSnap = await getDocs(collection(db, 'exercises'));
-      return reSnap.docs.map(d => ({ ...d.data(), id: d.id } as Exercise));
+    if (!snap.empty) {
+      const cloudExercises = snap.docs.map(d => {
+        const raw = { ...d.data(), id: d.id } as Exercise;
+        const resolved = resolveExerciseMedia(raw);
+        return {
+          ...raw,
+          mediaUrl: resolved.mediaUrl,
+          posterUrl: resolved.posterUrl,
+          mediaType: resolved.mediaType,
+        };
+      });
+      const cloudMap = new Map<string, Exercise>();
+      cloudExercises.forEach(ex => cloudMap.set(ex.id, ex));
+
+      const merged = ALL_DATASET_EXERCISES.map(base => cloudMap.get(base.id) || base);
+      // Include custom user-created exercises
+      cloudExercises.forEach(ex => {
+        if (!ALL_DATASET_EXERCISES.some(b => b.id === ex.id)) {
+          merged.unshift(ex);
+        }
+      });
+      return merged;
     }
-    return snap.docs.map(d => ({ ...d.data(), id: d.id } as Exercise));
   } catch (error) {
-    handleFirestoreError(error, OperationType.LIST, path);
+    console.warn('Could not reach Firestore exercises collection, serving bundled dataset:', error);
   }
+  return ALL_DATASET_EXERCISES;
 }
 
 export async function saveExercise(exercise: Partial<Exercise> & { name: string }): Promise<Exercise> {
   const now = new Date().toISOString();
   const id = exercise.id || 'ex_' + Math.random().toString(36).substring(2, 10);
   const path = `exercises/${id}`;
+  const resolved = resolveExerciseMedia(exercise);
 
   const data: Exercise = {
     id,
@@ -250,14 +326,14 @@ export async function saveExercise(exercise: Partial<Exercise> & { name: string 
     equipment: exercise.equipment || 'Bodyweight',
     difficulty: exercise.difficulty || 'beginner',
     instructions: exercise.instructions || [],
-    mediaUrl: exercise.mediaUrl || 'https://upload.wikimedia.org/wikipedia/commons/8/82/Squats.gif',
-    mediaType: exercise.mediaType || 'image/gif',
-    posterUrl: exercise.posterUrl || '',
+    mediaUrl: resolved.mediaUrl,
+    mediaType: resolved.mediaType,
+    posterUrl: resolved.posterUrl,
     durationSeconds: exercise.durationSeconds || 3,
     loop: exercise.loop ?? true,
     sourceUrl: exercise.sourceUrl || '',
-    licenceName: exercise.licenceName || 'Creative Commons',
-    attributionText: exercise.attributionText || '',
+    licenceName: exercise.licenceName || 'Gym visual / Free for personal use',
+    attributionText: exercise.attributionText || '© Gym visual — https://gymvisual.com/',
     status: exercise.status || 'published',
     createdAt: exercise.createdAt || now,
     updatedAt: now,
@@ -298,6 +374,32 @@ export async function seedDefaultCuratedExercises(): Promise<void> {
   } catch (err) {
     console.warn('Auto-seed curated exercises skipped or permission deferred:', err);
   }
+}
+
+// Admin batch synchronization of all 1,324 dataset items to Firestore
+export async function syncExercisesToFirestore(
+  onProgress?: (synced: number, total: number) => void
+): Promise<number> {
+  const batchSize = 40;
+  let count = 0;
+  const total = ALL_DATASET_EXERCISES.length;
+
+  for (let i = 0; i < total; i += batchSize) {
+    const batch = writeBatch(db);
+    const chunk = ALL_DATASET_EXERCISES.slice(i, i + batchSize);
+    for (const ex of chunk) {
+      const ref = doc(db, 'exercises', ex.id);
+      batch.set(ref, ex, { merge: true });
+    }
+    await batch.commit();
+    count += chunk.length;
+    if (onProgress) {
+      onProgress(count, total);
+    }
+    // Small pause to yield UI thread
+    await new Promise(res => setTimeout(res, 50));
+  }
+  return count;
 }
 
 // --- Routines ---
@@ -393,9 +495,9 @@ async function seedInitialRoutine(ownerUid: string): Promise<void> {
       items: [
         {
           id: 'item_1',
-          exerciseId: 'curated_bodyweight-squat',
-          exerciseName: 'Bodyweight Squat',
-          mediaUrl: 'https://upload.wikimedia.org/wikipedia/commons/8/82/Squats.gif',
+          exerciseId: 'ex_2368',
+          exerciseName: 'Split Squat Bodyweight',
+          mediaUrl: 'https://cdn.jsdelivr.net/gh/hasaneyldrm/exercises-dataset@main/videos/2368-9E25EOx.gif',
           mediaType: 'image/gif',
           position: 1,
           sets: 3,
@@ -406,9 +508,9 @@ async function seedInitialRoutine(ownerUid: string): Promise<void> {
         },
         {
           id: 'item_2',
-          exerciseId: 'curated_push-up',
+          exerciseId: 'ex_0662',
           exerciseName: 'Push-Up',
-          mediaUrl: 'https://upload.wikimedia.org/wikipedia/commons/b/b8/Liegestuetz_1.gif',
+          mediaUrl: 'https://cdn.jsdelivr.net/gh/hasaneyldrm/exercises-dataset@main/videos/0662-I4hDWkc.gif',
           mediaType: 'image/gif',
           position: 2,
           sets: 3,
@@ -419,9 +521,9 @@ async function seedInitialRoutine(ownerUid: string): Promise<void> {
         },
         {
           id: 'item_3',
-          exerciseId: 'curated_forearm-plank',
-          exerciseName: 'Forearm Plank',
-          mediaUrl: 'https://upload.wikimedia.org/wikipedia/commons/7/7b/Plank_exercise.gif',
+          exerciseId: 'ex_0464',
+          exerciseName: 'Forearm Front Plank',
+          mediaUrl: 'https://cdn.jsdelivr.net/gh/hasaneyldrm/exercises-dataset@main/videos/0464-CosupLu.gif',
           mediaType: 'image/gif',
           position: 3,
           sets: 3,

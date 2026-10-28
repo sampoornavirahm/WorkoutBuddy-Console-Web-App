@@ -1,12 +1,12 @@
 {
   "projectId": "workoutbuddyweb",
-  "appId": "1:274264390397:web:78f2da778911f886715c94",
+  "appId": "1:274264390397:web:efb6547be42ecd26715c94",
   "apiKey": "AIzaSyDjHmgy6SCCt8fUP1qjSM4G-GEo6PyOiKg",
   "authDomain": "workoutbuddyweb.firebaseapp.com",
   "firestoreDatabaseId": "(default)",
   "storageBucket": "workoutbuddyweb.firebasestorage.app",
   "messagingSenderId": "274264390397",
-  "measurementId": "G-0X6JKHLFYZ",
-  "oAuthClientId": "",
+  "measurementId": "",
+  "oAuthClientId": "274264390397-kh7pt57j58ugc958mc5e9vrt1rf3a82f.apps.googleusercontent.com",
   "recaptchaSiteKey": ""
 }

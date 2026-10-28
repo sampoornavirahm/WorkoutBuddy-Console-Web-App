@@ -17,6 +17,15 @@ export interface UserRoleRecord {
   grantedBy: string;
 }
 
+export interface TvUserAccount {
+  uid: string;
+  email: string;
+  displayName: string;
+  photoURL?: string;
+  role?: string;
+  pairedAt?: string;
+}
+
 export interface PairedDevice {
   deviceUid: string;
   deviceName: string;
@@ -24,10 +33,13 @@ export interface PairedDevice {
   lastSeenAt?: string;
   active: boolean;
   lastPairingSessionId?: string;
+  pairingCode?: string;
+  userEmail?: string;
 }
 
 export interface PairingSession {
   sessionId: string;
+  pairingCode: string;
   deviceUid: string;
   deviceName: string;
   status: 'pending' | 'paired' | 'expired' | 'revoked';
@@ -35,6 +47,7 @@ export interface PairingSession {
   expiresAt: string;
   pairedByUid?: string;
   pairedAt?: string;
+  userAccount?: TvUserAccount;
 }
 
 export interface Exercise {
@@ -61,6 +74,22 @@ export interface Exercise {
   updatedAt: string;
   createdBy?: string;
   updatedBy?: string;
+  // GIF Accuracy & Verification
+  isGifWrong?: boolean;
+  gifStatus?: 'correct' | 'wrong' | 'unreviewed';
+  gifFeedbackNote?: string;
+  flaggedAt?: string;
+  flaggedBy?: string;
+}
+
+export interface ExerciseVerificationFlag {
+  exerciseId: string;
+  isGifWrong: boolean;
+  status: 'correct' | 'wrong';
+  reason?: string;
+  flaggedAt: string;
+  flaggedBy?: string;
+  reporterEmail?: string;
 }
 
 export interface RoutineItem {

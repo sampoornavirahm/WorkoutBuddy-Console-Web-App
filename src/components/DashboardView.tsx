@@ -278,9 +278,14 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               </div>
               <ExternalLink className="w-4 h-4 text-[#9C9A94] group-hover:text-[#171615] transition-colors" />
             </div>
-            <h3 className="font-semibold text-sm text-[#171615] mb-1">Exercise Library</h3>
+            <div className="flex items-center gap-2 mb-1">
+              <h3 className="font-semibold text-sm text-[#171615]">Exercise Library</h3>
+              <span className="text-[11px] font-mono tabular-nums text-[#6E6C67] bg-[#F3F1EC] px-1.5 py-0.5 rounded font-medium">
+                1,324+ animations
+              </span>
+            </div>
             <p className="text-xs text-[#6E6C67] leading-relaxed">
-              Explore animated exercise demonstrations with step-by-step cues, target muscle groups, and open-source attributions.
+              Explore the complete 1,324 animated biomechanical exercises across 16 muscle groups and 14 equipment types.
             </p>
           </div>
 

@@ -13,10 +13,20 @@ const resolvedConfig = {
 };
 
 const app = getApps().length === 0 ? initializeApp(resolvedConfig) : getApp();
-const dbId = import.meta.env.VITE_FIREBASE_FIRESTORE_DATABASE_ID || firebaseConfig.firestoreDatabaseId;
+
+// Connect to the project's standard (default) Firestore database
+// (or an explicit VITE_FIREBASE_FIRESTORE_DATABASE_ID override if specified)
+const envDbId = import.meta.env.VITE_FIREBASE_FIRESTORE_DATABASE_ID;
+const effectiveDatabaseId: string | undefined =
+  envDbId && envDbId !== '(default)'
+    ? envDbId
+    : firebaseConfig.firestoreDatabaseId && firebaseConfig.firestoreDatabaseId !== '(default)'
+    ? firebaseConfig.firestoreDatabaseId
+    : undefined;
 
 export const auth = getAuth(app);
-export const db = getFirestore(app);
+// Calling getFirestore(app) with no second argument connects directly to (default)
+export const db = effectiveDatabaseId ? getFirestore(app, effectiveDatabaseId) : getFirestore(app);
 
 // Test Firestore connection on boot as mandated by the Firebase skill
 async function testConnection() {

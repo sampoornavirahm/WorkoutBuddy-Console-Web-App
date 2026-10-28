@@ -8,6 +8,12 @@ import {
   deleteRoutine,
   getExercises
 } from '../services/firestoreService';
+import { ExerciseAnimationStage } from './ExerciseAnimationStage';
+import {
+  subscribeExerciseFlags,
+  isExerciseGifWrong,
+  ExerciseVerificationFlag
+} from '../services/exerciseVerificationService';
 import {
   Plus,
   Edit3,
@@ -20,12 +26,14 @@ import {
   Play,
   CheckCircle2,
   AlertCircle,
+  AlertTriangle,
   X,
   Eye,
   Lock,
   Globe,
   Sliders,
-  Sparkles
+  Sparkles,
+  Ban
 } from 'lucide-react';
 
 export const RoutineBuilderView: React.FC = () => {
@@ -52,8 +60,22 @@ export const RoutineBuilderView: React.FC = () => {
   // Exercise Picker Drawer in Editor
   const [isPickerOpen, setIsPickerOpen] = useState(false);
   const [pickerSearch, setPickerSearch] = useState('');
+  const [pickerMuscle, setPickerMuscle] = useState('all');
+  const [pickerEquipment, setPickerEquipment] = useState('all');
+  const [pickerLimit, setPickerLimit] = useState(30);
+  const [hideFlaggedInPicker, setHideFlaggedInPicker] = useState(false);
   const [previewMediaUrl, setPreviewMediaUrl] = useState<{ url: string; type: string; title: string } | null>(null);
   const [saving, setSaving] = useState(false);
+
+  // Verification Flags Store
+  const [flags, setFlags] = useState<Record<string, ExerciseVerificationFlag>>({});
+
+  useEffect(() => {
+    const unsub = subscribeExerciseFlags((updatedFlags) => {
+      setFlags(updatedFlags);
+    });
+    return unsub;
+  }, []);
 
   const loadData = async () => {
     try {
@@ -109,6 +131,14 @@ export const RoutineBuilderView: React.FC = () => {
   };
 
   const handleAddExerciseToRoutine = (exercise: Exercise) => {
+    if (isExerciseGifWrong(exercise.id)) {
+      setFeedback({
+        text: `Cannot add "${exercise.name}": This exercise's animation has been flagged as wrong and is disabled from routines until corrected.`,
+        type: 'error'
+      });
+      return;
+    }
+
     const newItem: RoutineItem = {
       id: 'item_' + Math.random().toString(36).substring(2, 9),
       exerciseId: exercise.id,
@@ -526,13 +556,19 @@ export const RoutineBuilderView: React.FC = () => {
                         className="p-4 bg-[#FAFAF8] border border-[#E6E4DF] rounded-xl space-y-3"
                       >
                         <div className="flex items-center justify-between">
-                          <div className="flex items-center gap-2">
-                            <span className="w-5 h-5 rounded-full bg-[#171615] text-white text-xs flex items-center justify-center font-numeric font-medium">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="w-5 h-5 rounded-full bg-[#171615] text-white text-xs flex items-center justify-center font-numeric font-medium shrink-0">
                               {index + 1}
                             </span>
                             <span className="font-semibold text-sm text-[#171615]">
                               {item.exerciseName}
                             </span>
+                            {isExerciseGifWrong(item.exerciseId) && (
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold uppercase bg-red-100 text-red-800 border border-red-200">
+                                <AlertTriangle className="w-3 h-3 text-red-600" />
+                                <span>GIF flagged wrong</span>
+                              </span>
+                            )}
                             {item.mediaUrl && (
                               <button
                                 type="button"
@@ -660,70 +696,239 @@ export const RoutineBuilderView: React.FC = () => {
       )}
 
       {/* Exercise Catalogue Picker Drawer */}
-      {isPickerOpen && (
-        <div className="fixed inset-0 z-60 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4">
-          <div className="bg-white border border-[#E6E4DF] rounded-xl max-w-2xl w-full p-6 shadow-2xl space-y-4 max-h-[85vh] flex flex-col">
-            <div className="flex items-center justify-between pb-3 border-b border-[#E6E4DF]">
-              <div>
-                <h3 className="font-bold text-base text-[#171615]">Select Exercise from Catalogue</h3>
-                <p className="text-xs text-[#6E6C67]">Choose an exercise to add to the circuit sequence.</p>
+      {isPickerOpen && (() => {
+        const distinctPickerMuscles = Array.from(new Set(exercises.flatMap(e => e.primaryMuscles || []))).sort();
+        const distinctPickerEquipment = Array.from(new Set(exercises.map(e => e.equipment).filter(Boolean))).sort();
+
+        const filteredPickerExercises = exercises.filter(e => {
+          if (hideFlaggedInPicker && isExerciseGifWrong(e.id)) {
+            return false;
+          }
+          const q = pickerSearch.trim().toLowerCase();
+          if (q) {
+            const matchName = e.name.toLowerCase().includes(q);
+            const matchMuscle = e.primaryMuscles?.some(m => m.toLowerCase().includes(q));
+            const matchEquip = e.equipment?.toLowerCase().includes(q);
+            if (!matchName && !matchMuscle && !matchEquip) return false;
+          }
+          if (pickerMuscle !== 'all') {
+            const hasMuscle = e.primaryMuscles?.some(m => m.toLowerCase() === pickerMuscle.toLowerCase()) ||
+              e.secondaryMuscles?.some(m => m.toLowerCase() === pickerMuscle.toLowerCase());
+            if (!hasMuscle) return false;
+          }
+          if (pickerEquipment !== 'all') {
+            if (e.equipment?.toLowerCase() !== pickerEquipment.toLowerCase()) return false;
+          }
+          return true;
+        });
+
+        const displayedPickerExercises = filteredPickerExercises.slice(0, pickerLimit);
+
+        return (
+          <div className="fixed inset-0 z-60 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4">
+            <div className="bg-white border border-[#E6E4DF] rounded-xl max-w-2xl w-full p-6 shadow-2xl space-y-4 max-h-[85vh] flex flex-col">
+              <div className="flex items-center justify-between pb-3 border-b border-[#E6E4DF]">
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h3 className="font-bold text-base text-[#171615]">Select Exercise from Catalogue</h3>
+                    <span className="text-[11px] font-mono tabular-nums px-2 py-0.5 bg-[#F3F1EC] text-[#6E6C67] rounded font-semibold">
+                      {exercises.length} available
+                    </span>
+                  </div>
+                  <p className="text-xs text-[#6E6C67] mt-0.5">Filter by muscle or equipment to find exercises for your circuit.</p>
+                </div>
+                <button
+                  onClick={() => setIsPickerOpen(false)}
+                  className="text-[#6E6C67] hover:text-[#171615] cursor-pointer"
+                >
+                  <X className="w-5 h-5" />
+                </button>
               </div>
-              <button
-                onClick={() => setIsPickerOpen(false)}
-                className="text-[#6E6C67] hover:text-[#171615] cursor-pointer"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
 
-            <input
-              type="text"
-              placeholder="Search exercise..."
-              value={pickerSearch}
-              onChange={(e) => setPickerSearch(e.target.value)}
-              className="w-full px-3 py-2 text-xs bg-[#FAFAF8] border border-[#D1CFCA] rounded-lg focus:outline-none"
-            />
+              {/* Filter controls */}
+              <div className="space-y-2">
+                <input
+                  type="text"
+                  placeholder="Search 1,324 exercises by name, muscles, or equipment..."
+                  value={pickerSearch}
+                  onChange={(e) => {
+                    setPickerSearch(e.target.value);
+                    setPickerLimit(30);
+                  }}
+                  className="w-full px-3 py-2 text-xs bg-[#FAFAF8] border border-[#D1CFCA] rounded-lg focus:outline-none focus:border-[#171615]"
+                />
 
-            <div className="flex-1 overflow-y-auto divide-y divide-[#F3F1EC]">
-              {exercises
-                .filter(e => e.name.toLowerCase().includes(pickerSearch.toLowerCase()) ||
-                  e.primaryMuscles.some(m => m.toLowerCase().includes(pickerSearch.toLowerCase())))
-                .map((ex) => (
-                  <div
-                    key={ex.id}
-                    className="py-3 flex items-center justify-between hover:bg-[#FAFAF8] px-2 rounded-lg transition-colors"
+                <div className="flex flex-wrap items-center gap-2">
+                  <select
+                    value={pickerMuscle}
+                    onChange={(e) => {
+                      setPickerMuscle(e.target.value);
+                      setPickerLimit(30);
+                    }}
+                    className="text-xs bg-[#FAFAF8] border border-[#D1CFCA] rounded-md px-2 py-1 text-[#171615] focus:outline-none cursor-pointer"
                   >
-                    <div className="flex items-center gap-3">
-                      <div className="w-12 h-12 bg-[#171615] rounded overflow-hidden flex items-center justify-center shrink-0">
-                        {ex.mediaType === 'video/mp4' ? (
-                          <video src={ex.mediaUrl} className="w-full h-full object-cover" muted />
-                        ) : (
-                          <img src={ex.mediaUrl} alt={ex.name} className="w-full h-full object-contain" />
-                        )}
-                      </div>
-                      <div>
-                        <div className="font-semibold text-xs text-[#171615]">{ex.name}</div>
-                        <div className="text-[11px] text-[#6E6C67] flex items-center gap-1.5 mt-0.5">
-                          <span>{ex.primaryMuscles.join(', ')}</span>
-                          <span aria-hidden="true">·</span>
-                          <span className="capitalize">{ex.difficulty}</span>
+                    <option value="all">All Muscles ({distinctPickerMuscles.length})</option>
+                    {distinctPickerMuscles.map(m => (
+                      <option key={m} value={m}>{m}</option>
+                    ))}
+                  </select>
+
+                  <select
+                    value={pickerEquipment}
+                    onChange={(e) => {
+                      setPickerEquipment(e.target.value);
+                      setPickerLimit(30);
+                    }}
+                    className="text-xs bg-[#FAFAF8] border border-[#D1CFCA] rounded-md px-2 py-1 text-[#171615] focus:outline-none cursor-pointer"
+                  >
+                    <option value="all">All Equipment ({distinctPickerEquipment.length})</option>
+                    {distinctPickerEquipment.map(eq => (
+                      <option key={eq} value={eq}>{eq}</option>
+                    ))}
+                  </select>
+
+                  <label className="flex items-center gap-1.5 text-xs text-[#6E6C67] cursor-pointer select-none bg-[#FAFAF8] border border-[#D1CFCA] rounded-md px-2.5 py-1">
+                    <input
+                      type="checkbox"
+                      checked={hideFlaggedInPicker}
+                      onChange={(e) => setHideFlaggedInPicker(e.target.checked)}
+                      className="rounded border-[#D1CFCA] text-[#171615] focus:ring-0 cursor-pointer"
+                    />
+                    <span>Hide flagged / disabled</span>
+                  </label>
+
+                  {(pickerSearch || pickerMuscle !== 'all' || pickerEquipment !== 'all' || hideFlaggedInPicker) && (
+                    <button
+                      onClick={() => {
+                        setPickerSearch('');
+                        setPickerMuscle('all');
+                        setPickerEquipment('all');
+                        setHideFlaggedInPicker(false);
+                        setPickerLimit(30);
+                      }}
+                      className="text-xs text-[#B45309] hover:underline cursor-pointer font-medium ml-auto"
+                    >
+                      Clear Filters
+                    </button>
+                  )}
+                </div>
+
+                <div className="text-[11px] text-[#6E6C67] pt-1 flex items-center justify-between">
+                  <div>
+                    Showing <strong className="text-[#171615] font-mono tabular-nums">{displayedPickerExercises.length}</strong> of{' '}
+                    <strong className="text-[#171615] font-mono tabular-nums">{filteredPickerExercises.length}</strong> matching exercises
+                  </div>
+                  <div className="text-[11px] text-[#6E6C67]">
+                    Exercises with flagged GIFs are disabled from addition
+                  </div>
+                </div>
+              </div>
+
+              {/* Scrollable list */}
+              <div className="flex-1 overflow-y-auto divide-y divide-[#F3F1EC]">
+                {displayedPickerExercises.length === 0 ? (
+                  <div className="p-8 text-center text-xs text-[#6E6C67]">
+                    No exercises match your filter criteria.
+                  </div>
+                ) : (
+                  displayedPickerExercises.map((ex) => {
+                    const isWrong = isExerciseGifWrong(ex.id);
+
+                    return (
+                      <div
+                        key={ex.id}
+                        className={`py-3 flex items-center justify-between px-2.5 rounded-lg transition-colors gap-3 ${
+                          isWrong ? 'bg-red-50/20 border border-dashed border-red-200' : 'hover:bg-[#FAFAF8]'
+                        }`}
+                      >
+                        <div className="flex items-center gap-3 min-w-0">
+                          <ExerciseAnimationStage
+                            mediaUrl={ex.mediaUrl}
+                            posterUrl={ex.posterUrl}
+                            mediaType={ex.mediaType}
+                            name={ex.name}
+                            size="thumb"
+                            interactive
+                            onInspect={() => setPreviewMediaUrl({ url: ex.mediaUrl, type: ex.mediaType, title: ex.name })}
+                          />
+
+                          <div className="min-w-0">
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              <span
+                                className={`font-semibold text-xs truncate ${
+                                  isWrong ? 'text-red-950 line-through' : 'text-[#171615]'
+                                }`}
+                              >
+                                {ex.name}
+                              </span>
+                              {isWrong && (
+                                <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold uppercase bg-red-100 text-red-800 border border-red-200">
+                                  <AlertTriangle className="w-2.5 h-2.5 text-red-600" />
+                                  <span>Disabled</span>
+                                </span>
+                              )}
+                            </div>
+                            <div className="text-[11px] text-[#6E6C67] flex items-center gap-1.5 mt-0.5 flex-wrap">
+                              <span>{ex.primaryMuscles.join(', ')}</span>
+                              <span aria-hidden="true">·</span>
+                              <span>{ex.equipment}</span>
+                              <span aria-hidden="true">·</span>
+                              <span className="capitalize">{ex.difficulty}</span>
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center gap-2 shrink-0">
+                          <button
+                            type="button"
+                            onClick={() => setPreviewMediaUrl({ url: ex.mediaUrl, type: ex.mediaType, title: ex.name })}
+                            className="px-2 py-1 text-xs text-[#6E6C67] hover:text-[#171615] font-medium cursor-pointer"
+                          >
+                            Preview
+                          </button>
+                          {isWrong ? (
+                            <button
+                              type="button"
+                              disabled
+                              title="Cannot add: this exercise's animation has been flagged as wrong and is disabled until corrected."
+                              className="px-3 py-1.5 bg-neutral-200 text-neutral-400 text-xs font-semibold rounded cursor-not-allowed shadow-none"
+                            >
+                              Disabled
+                            </button>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                handleAddExerciseToRoutine(ex);
+                                setIsPickerOpen(false);
+                              }}
+                              className="px-3 py-1.5 bg-[#171615] text-white text-xs font-semibold rounded hover:bg-[#2A2926] cursor-pointer shadow-xs"
+                            >
+                              Add
+                            </button>
+                          )}
                         </div>
                       </div>
-                    </div>
+                    );
+                  })
+                )}
 
+                {displayedPickerExercises.length < filteredPickerExercises.length && (
+                  <div className="p-3 text-center">
                     <button
                       type="button"
-                      onClick={() => handleAddExerciseToRoutine(ex)}
-                      className="px-3 py-1.5 bg-[#171615] text-white text-xs font-medium rounded hover:bg-[#2A2926] cursor-pointer"
+                      onClick={() => setPickerLimit(prev => Math.min(prev + 30, filteredPickerExercises.length))}
+                      className="text-xs text-[#B45309] font-semibold hover:underline cursor-pointer"
                     >
-                      Add
+                      Load 30 More Exercises ({filteredPickerExercises.length - displayedPickerExercises.length} remaining)
                     </button>
                   </div>
-                ))}
+                )}
+              </div>
             </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
 
       {/* Animation Pop-up preview inside routine builder */}
       {previewMediaUrl && (
@@ -735,14 +940,13 @@ export const RoutineBuilderView: React.FC = () => {
             >
               <X className="w-4 h-4" />
             </button>
-            <div className="bg-[#171615] h-64 flex items-center justify-center p-4">
-              {previewMediaUrl.type === 'video/mp4' ? (
-                <video src={previewMediaUrl.url} controls autoPlay loop className="max-h-full max-w-full" />
-              ) : (
-                <img src={previewMediaUrl.url} alt={previewMediaUrl.title} className="max-h-full max-w-full object-contain" />
-              )}
-            </div>
-            <div className="p-4 text-xs font-semibold text-[#171615]">
+            <ExerciseAnimationStage
+              mediaUrl={previewMediaUrl.url}
+              mediaType={previewMediaUrl.type}
+              name={previewMediaUrl.title}
+              size="modal"
+            />
+            <div className="p-4 text-xs font-semibold text-[#171615] bg-white border-t border-[#E6E4DF]">
               {previewMediaUrl.title}
             </div>
           </div>

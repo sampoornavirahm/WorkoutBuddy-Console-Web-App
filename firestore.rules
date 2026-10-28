@@ -71,6 +71,13 @@ service cloud.firestore {
         data.status in ['draft', 'published', 'archived'];
     }
 
+    function isValidExerciseFlag(data) {
+      return data.exerciseId is string && data.exerciseId.size() <= 128 &&
+        data.isGifWrong is bool &&
+        data.status in ['correct', 'wrong'] &&
+        (!('reason' in data) || (data.reason is string && data.reason.size() <= 500));
+    }
+
     function isValidRoutine(data) {
       return data.name is string && data.name.size() > 0 && data.name.size() <= 100 &&
         data.ownerUid is string &&
@@ -142,6 +149,13 @@ service cloud.firestore {
       allow get: if resource.data.status == 'published' || isPro() || isAdmin();
       allow list: if resource.data.status == 'published' || isPro() || isAdmin();
       allow create, update: if isAdmin() && isValidExercise(incoming());
+      allow delete: if isAdmin();
+    }
+
+    // 5b. Exercise Animation Flags: Verification ratings (correct/wrong)
+    match /exerciseFlags/{exerciseId} {
+      allow get, list: if true;
+      allow create, update: if isValidId(exerciseId) && isValidExerciseFlag(incoming());
       allow delete: if isAdmin();
     }
 

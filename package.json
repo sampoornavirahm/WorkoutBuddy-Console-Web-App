@@ -11,7 +11,9 @@
     "lint": "tsc --noEmit",
     "emulators": "firebase emulators:start --only firestore,auth,hosting",
     "test:rules": "firebase emulators:exec --only firestore 'echo Running firestore rules test suite'",
-    "migrate": "node scripts/seed-new-project.mjs"
+    "migrate": "node scripts/seed-new-project.mjs",
+    "deploy": "npm run build && firebase deploy --only hosting --project workoutbuddyweb",
+    "deploy:all": "npm run build && firebase deploy --project workoutbuddyweb"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",
@@ -20,6 +22,7 @@
     "dotenv": "^17.2.3",
     "express": "^4.21.2",
     "firebase": "^9.14.0",
+    "jsqr": "^1.4.0",
     "lucide-react": "^0.546.0",
     "motion": "^12.23.24",
     "qrcode.react": "^4.2.0",

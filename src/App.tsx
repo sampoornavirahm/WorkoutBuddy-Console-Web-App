@@ -14,6 +14,7 @@ import { RoleManagerView } from './components/RoleManagerView';
 import { PairingView } from './components/PairingView';
 import { LoginModal } from './components/LoginModal';
 import { TvSimulatorModal } from './components/TvSimulatorModal';
+import { AuthScreen } from './components/AuthScreen';
 import { ShieldAlert, Sparkles, Tv, Dumbbell, ExternalLink } from 'lucide-react';
 
 function AppContent() {
@@ -65,6 +66,11 @@ function AppContent() {
     );
   }
 
+  // Without login, the application is strictly not visible
+  if (!currentUser) {
+    return <AuthScreen pendingPairingSessionId={pendingSessionId} />;
+  }
+
   return (
     <div className="min-h-screen bg-[#FAFAF8] flex flex-col text-[#171615]">
       {/* Top Bar Navigation */}
@@ -97,7 +103,7 @@ function AppContent() {
         )}
 
         {currentTab === 'exercises' && (
-          <ExerciseManagerView />
+          <ExerciseManagerView onNavigateTab={handleSelectTab} />
         )}
 
         {currentTab === 'banners' && (

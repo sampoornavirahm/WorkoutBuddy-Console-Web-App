@@ -23,7 +23,7 @@ interface AuthContextType {
   loading: boolean;
   signInWithGoogle: () => Promise<void>;
   signInWithEmail: (e: string, p: string) => Promise<void>;
-  signUpWithEmail: (e: string, p: string) => Promise<void>;
+  signUpWithEmail: (e: string, p: string, displayName?: string) => Promise<void>;
   resetPassword: (e: string) => Promise<void>;
   logout: () => Promise<void>;
   refreshProfile: () => Promise<void>;
@@ -61,6 +61,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           setUserProfile(prof);
         } catch (err) {
           console.warn('Error loading user role or profile:', err);
+          setUserProfile({
+            uid: user.uid,
+            email: user.email || '',
+            displayName: user.displayName || user.email?.split('@')[0] || 'Athlete',
+            photoURL: user.photoURL || '',
+            preferredUnits: 'metric',
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+          });
         }
       } else {
         setUserProfile(null);
@@ -88,19 +97,36 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const signInWithGoogle = async () => {
     const provider = new GoogleAuthProvider();
-    await signInWithPopup(auth, provider);
+    provider.setCustomParameters({ prompt: 'select_account' });
+    const cred = await signInWithPopup(auth, provider);
+    if (cred.user) {
+      try {
+        const existing = await getUserProfile(cred.user.uid);
+        if (!existing) {
+          await saveUserProfile({
+            uid: cred.user.uid,
+            email: cred.user.email || '',
+            displayName: cred.user.displayName || cred.user.email?.split('@')[0] || 'Athlete',
+            photoURL: cred.user.photoURL || '',
+            preferredUnits: 'metric',
+          });
+        }
+      } catch (err) {
+        console.warn('Google sign-in user profile setup note:', err);
+      }
+    }
   };
 
   const signInWithEmail = async (email: string, pass: string) => {
     await signInWithEmailAndPassword(auth, email, pass);
   };
 
-  const signUpWithEmail = async (email: string, pass: string) => {
+  const signUpWithEmail = async (email: string, pass: string, displayName?: string) => {
     const cred = await createUserWithEmailAndPassword(auth, email, pass);
     await saveUserProfile({
       uid: cred.user.uid,
       email: cred.user.email || email,
-      displayName: email.split('@')[0],
+      displayName: displayName?.trim() || email.split('@')[0],
       preferredUnits: 'metric',
     });
   };
