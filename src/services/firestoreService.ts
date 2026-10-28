@@ -9,6 +9,7 @@ import {
   query,
   where,
   orderBy,
+  limit,
   runTransaction,
   writeBatch
 } from 'firebase/firestore';
@@ -177,31 +178,100 @@ export async function createPairingSession(
 }
 
 export async function getPairingSession(codeOrSessionId: string): Promise<PairingSession | null> {
-  const normalized = codeOrSessionId.trim().toUpperCase().replace(/[^A-Z0-9_]/g, '');
-  if (!normalized) return null;
+  const raw = codeOrSessionId.trim();
+  if (!raw) return null;
 
-  // 1. Direct getDoc by normalized ID (O(1))
-  try {
-    const snap = await getDoc(doc(db, 'pairingSessions', normalized));
-    if (snap.exists()) {
-      return snap.data() as PairingSession;
+  // Clean characters: remove dashes, spaces
+  const clean = raw.replace(/[\s\-]/g, '');
+  const cleanUpper = clean.toUpperCase();
+  const cleanLower = clean.toLowerCase();
+
+  // Helper to extract session data guaranteeing correct document ID
+  const parseSessionSnap = (snap: { id: string; data: () => any }): PairingSession => {
+    const data = snap.data();
+    return {
+      ...data,
+      sessionId: snap.id, // Ensure document key is preserved for transactions
+      pairingCode: String(data.pairingCode || data.sessionId || snap.id),
+    };
+  };
+
+  // 1. Direct getDoc by exact, uppercase, or lowercase doc ID
+  for (const candidateId of [clean, cleanUpper, cleanLower]) {
+    try {
+      const snap = await getDoc(doc(db, 'pairingSessions', candidateId));
+      if (snap.exists()) {
+        return parseSessionSnap(snap);
+      }
+    } catch (e) {
+      // Continue to query fallback
     }
-  } catch (error) {
-    console.warn('Direct lookup error for pairing session:', error);
   }
 
-  // 2. Query by pairingCode field in case doc had an alternate id format
+  // 2. Query by pairingCode field (string uppercase, string as-is, or numeric)
   try {
-    const q = query(collection(db, 'pairingSessions'), where('pairingCode', '==', normalized));
-    const snap = await getDocs(q);
-    if (!snap.empty) {
-      return snap.docs[0].data() as PairingSession;
+    const q1 = query(collection(db, 'pairingSessions'), where('pairingCode', '==', cleanUpper));
+    const snap1 = await getDocs(q1);
+    if (!snap1.empty) {
+      return parseSessionSnap(snap1.docs[0]);
+    }
+
+    if (clean !== cleanUpper) {
+      const q2 = query(collection(db, 'pairingSessions'), where('pairingCode', '==', clean));
+      const snap2 = await getDocs(q2);
+      if (!snap2.empty) {
+        return parseSessionSnap(snap2.docs[0]);
+      }
+    }
+
+    // Try numeric if clean is all digits
+    if (/^\d+$/.test(clean)) {
+      const qNum = query(collection(db, 'pairingSessions'), where('pairingCode', '==', Number(clean)));
+      const snapNum = await getDocs(qNum);
+      if (!snapNum.empty) {
+        return parseSessionSnap(snapNum.docs[0]);
+      }
     }
   } catch (error) {
-    console.warn('Pairing code query error:', error);
+    console.warn('Pairing code query note:', error);
+  }
+
+  // 3. Query by sessionId field
+  try {
+    const qSession = query(collection(db, 'pairingSessions'), where('sessionId', '==', cleanLower));
+    const snapSession = await getDocs(qSession);
+    if (!snapSession.empty) {
+      return parseSessionSnap(snapSession.docs[0]);
+    }
+  } catch (error) {
+    console.warn('SessionId query note:', error);
   }
 
   return null;
+}
+
+/**
+ * Diagnostic helper: fetches recent pairing sessions from Firestore
+ * so users can inspect active TV sessions and diagnose mismatched codes.
+ */
+export async function getRecentPairingSessions(limitCount = 5): Promise<PairingSession[]> {
+  try {
+    const q = query(collection(db, 'pairingSessions'), limit(20));
+    const snap = await getDocs(q);
+    const sessions = snap.docs.map(d => ({
+      ...d.data(),
+      sessionId: d.id,
+      pairingCode: String(d.data().pairingCode || d.id),
+    })) as PairingSession[];
+
+    // Sort newest first
+    return sessions
+      .sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime())
+      .slice(0, limitCount);
+  } catch (err) {
+    console.warn('Could not fetch recent pairing sessions for diagnostics:', err);
+    return [];
+  }
 }
 
 export async function claimPairingSession(

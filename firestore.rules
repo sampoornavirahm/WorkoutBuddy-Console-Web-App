@@ -53,6 +53,16 @@ service cloud.firestore {
         get(/databases/$(database)/documents/users/$(ownerUid)/pairedDevices/$(request.auth.uid)).data.active == true;
     }
 
+    function isTvUnlinkingOwnDevice(deviceUid) {
+      return isSignedIn() &&
+        request.auth.uid == deviceUid &&
+        existing().active == true &&
+        incoming().active == false &&
+        incoming().disconnectedAt is string &&
+        incoming().disconnectedAt.size() <= 40 &&
+        incoming().diff(existing()).affectedKeys().hasOnly(['active', 'disconnectedAt']);
+    }
+
     // Validation blueprints
     function isValidProfile(data, uid) {
       return data.uid == uid &&
@@ -84,6 +94,33 @@ service cloud.firestore {
         data.visibility in ['private', 'public'] &&
         data.status in ['draft', 'published', 'archived'] &&
         data.items is list && data.items.size() <= 100;
+    }
+
+    function matchesPairingSessionCode(mapping, pairingCode, sessionPath) {
+      let session = getAfter(sessionPath).data;
+      return session.status == 'pending' &&
+        session.sessionId == mapping.sessionId &&
+        session.pairingCode == pairingCode &&
+        session.deviceUid == mapping.deviceUid &&
+        session.expiresAt == mapping.expiresAt &&
+        session.expiresAtMillis == mapping.expiresAtMillis &&
+        session.expiresAtTimestamp == mapping.expiresAtTimestamp;
+    }
+
+    function isValidPairingSessionCode(pairingCode) {
+      let mapping = incoming();
+      let sessionPath = /databases/$(database)/documents/pairingSessions/$(mapping.sessionId);
+      return isSignedIn() &&
+        pairingCode.matches('^[0-9]{8}$') &&
+        mapping.keys().hasOnly(['sessionId', 'deviceUid', 'expiresAt', 'expiresAtMillis', 'expiresAtTimestamp']) &&
+        mapping.sessionId is string &&
+        isValidId(mapping.sessionId) &&
+        mapping.deviceUid == request.auth.uid &&
+        mapping.expiresAt is string &&
+        mapping.expiresAtMillis is number &&
+        mapping.expiresAtTimestamp is timestamp &&
+        existsAfter(sessionPath) &&
+        matchesPairingSessionCode(mapping, pairingCode, sessionPath);
     }
 
     function isValidBanner(data) {
@@ -118,14 +155,16 @@ service cloud.firestore {
     match /users/{uid}/pairedDevices/{deviceUid} {
       allow get: if isOwner(uid) || isAdmin() || (isSignedIn() && request.auth.uid == deviceUid);
       allow list: if isOwner(uid) || isAdmin();
-      allow create, update: if isOwner(uid) || isAdmin();
+      allow create: if isOwner(uid) || isAdmin();
+      allow update: if isOwner(uid) || isAdmin() || isTvUnlinkingOwnDevice(deviceUid);
       allow delete: if isOwner(uid) || isAdmin();
     }
 
     // 4. Pairing Sessions: 2-minute handshake sessions
     match /pairingSessions/{sessionId} {
       allow get, list: if true;
-      allow create: if isValidId(sessionId) &&
+      allow create: if isSignedIn() &&
+        isValidId(sessionId) &&
         incoming().status == 'pending' &&
         incoming().deviceUid is string &&
         incoming().deviceName is string &&
@@ -142,6 +181,13 @@ service cloud.firestore {
         (incoming().status in ['expired', 'revoked']) ||
         isAdmin();
       allow delete: if isAdmin();
+    }
+
+    // 4b. Numeric pairing-code index, created atomically with its session.
+    match /pairingSessionCodes/{pairingCode} {
+      allow create: if isValidPairingSessionCode(pairingCode);
+      allow update: if existing().expiresAtMillis <= request.time.toMillis() &&
+        isValidPairingSessionCode(pairingCode);
     }
 
     // 5. Exercise Catalogue: Published library readable by all / TV; manageable by admin

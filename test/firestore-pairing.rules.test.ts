@@ -7,7 +7,7 @@ import {
   assertSucceeds,
   RulesTestEnvironment
 } from '@firebase/rules-unit-testing';
-import { doc, getDoc, Timestamp, writeBatch } from 'firebase/firestore';
+import { doc, getDoc, setDoc, Timestamp, updateDoc, writeBatch } from 'firebase/firestore';
 
 const PROJECT_ID = 'demo-workoutbuddyweb';
 const [FIRESTORE_HOST, FIRESTORE_PORT] = (process.env.FIRESTORE_EMULATOR_HOST || '127.0.0.1:8080').split(':');
@@ -65,10 +65,104 @@ describe('TV pairing Firestore rules', () => {
 
   it('does not allow an unauthenticated client to create a pairing session', async () => {
     const db = testEnv.unauthenticatedContext().firestore();
+    const now = new Date();
+    const expiresAt = new Date(now.getTime() + 120000);
     await assertFails(
       writeBatch(db)
-        .set(doc(db, 'pairingSessions', 'tv_0123456789abcdef0123456789abcdef'), {})
+        .set(doc(db, 'pairingSessions', 'tv_0123456789abcdef0123456789abcdef'), {
+          sessionId: 'tv_0123456789abcdef0123456789abcdef',
+          pairingCode: '12345678',
+          deviceUid: 'tv_anonymous_uid',
+          deviceName: 'Workout Buddy webOS TV',
+          status: 'pending',
+          createdAt: now.toISOString(),
+          expiresAt: expiresAt.toISOString(),
+          expiresAtMillis: expiresAt.getTime(),
+          expiresAtTimestamp: Timestamp.fromDate(expiresAt)
+        })
         .commit()
     );
+  });
+
+  it('rejects a pairing-code mapping that does not match its session', async () => {
+    const deviceUid = 'tv_anonymous_uid';
+    const pairingCode = '12345678';
+    const sessionId = 'tv_0123456789abcdef0123456789abcdef';
+    const now = new Date();
+    const expiresAt = new Date(now.getTime() + 120000);
+    const db = testEnv.authenticatedContext(deviceUid).firestore();
+    const batch = writeBatch(db);
+
+    batch.set(doc(db, 'pairingSessions', sessionId), {
+      sessionId,
+      pairingCode,
+      deviceUid,
+      deviceName: 'Workout Buddy webOS TV',
+      status: 'pending',
+      createdAt: now.toISOString(),
+      expiresAt: expiresAt.toISOString(),
+      expiresAtMillis: expiresAt.getTime(),
+      expiresAtTimestamp: Timestamp.fromDate(expiresAt)
+    });
+    batch.set(doc(db, 'pairingSessionCodes', '87654321'), {
+      sessionId,
+      deviceUid,
+      expiresAt: expiresAt.toISOString(),
+      expiresAtMillis: expiresAt.getTime(),
+      expiresAtTimestamp: Timestamp.fromDate(expiresAt)
+    });
+
+    await assertFails(batch.commit());
+  });
+
+  it('allows a paired TV to deactivate only its own device record', async () => {
+    const ownerUid = 'account_owner';
+    const deviceUid = 'tv_anonymous_uid';
+    await testEnv.withSecurityRulesDisabled(async (context) => {
+      await setDoc(doc(context.firestore(), 'users', ownerUid, 'pairedDevices', deviceUid), {
+        active: true,
+        deviceName: 'Workout Buddy webOS TV'
+      });
+    });
+
+    const db = testEnv.authenticatedContext(deviceUid).firestore();
+    await assertSucceeds(updateDoc(doc(db, 'users', ownerUid, 'pairedDevices', deviceUid), {
+      active: false,
+      disconnectedAt: new Date().toISOString()
+    }));
+  });
+
+  it('rejects TV unlink requests that also change other device fields', async () => {
+    const ownerUid = 'account_owner';
+    const deviceUid = 'tv_anonymous_uid';
+    await testEnv.withSecurityRulesDisabled(async (context) => {
+      await setDoc(doc(context.firestore(), 'users', ownerUid, 'pairedDevices', deviceUid), {
+        active: true,
+        deviceName: 'Workout Buddy webOS TV'
+      });
+    });
+
+    const db = testEnv.authenticatedContext(deviceUid).firestore();
+    await assertFails(updateDoc(doc(db, 'users', ownerUid, 'pairedDevices', deviceUid), {
+      active: false,
+      disconnectedAt: new Date().toISOString(),
+      deviceName: 'Modified by TV'
+    }));
+  });
+
+  it('does not allow a TV to deactivate another device record', async () => {
+    const ownerUid = 'account_owner';
+    const deviceUid = 'another_tv';
+    await testEnv.withSecurityRulesDisabled(async (context) => {
+      await setDoc(doc(context.firestore(), 'users', ownerUid, 'pairedDevices', deviceUid), {
+        active: true
+      });
+    });
+
+    const db = testEnv.authenticatedContext('tv_anonymous_uid').firestore();
+    await assertFails(updateDoc(doc(db, 'users', ownerUid, 'pairedDevices', deviceUid), {
+      active: false,
+      disconnectedAt: new Date().toISOString()
+    }));
   });
 });
