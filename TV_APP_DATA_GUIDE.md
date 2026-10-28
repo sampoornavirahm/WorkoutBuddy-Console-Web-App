@@ -34,7 +34,8 @@ const db = getFirestore(app);
 
 | Collection Path | Read Access | TV Write Access | Purpose |
 | :--- | :--- | :--- | :--- |
-| `/pairingSessions/{pairingCode}` | Public | TV creates session (`status: 'pending'`); Web user updates to (`'paired'`) | 8-character code handshake linking TV to user account |
+| `/pairingSessions/{sessionId}` | Public | TV creates session (`status: 'pending'`); Web user updates to (`'paired'`) | TV pairing session |
+| `/pairingSessionCodes/{pairingCode}` | Public single-code get | TV creates code-to-session mapping | 8-character alphanumeric lookup key |
 | `/users/{uid}/pairedDevices/{deviceUid}` | Paired TV & User | TV updates heartbeat, `lastSeenAt`, `currentRoutineId`, `playbackState` | Hardware registry and active playback status |
 | `/routines/{routineId}` | User & Paired TV | Read-only on TV | Personalized workout routines created by the user |
 | `/exercises/{exerciseId}` | Public | Read-only on TV | 1,300+ animated exercise catalogue |
@@ -48,27 +49,65 @@ const db = getFirestore(app);
 
 ### A. TV Pairing & Account Handshake
 
-1. **TV Generates 8-Digit Pairing Code**:
-   The TV generates an unambiguous 8-digit uppercase code (e.g. `K8N29X4F`) and saves it as a new document:
+1. **TV Generates an 8-Character Alphanumeric Pairing Code**:
+   The TV first signs in anonymously. Its Firebase UID is the `deviceUid`. Generate an uppercase code (e.g. `K8N29X4F`) from `23456789ABCDEFGHJKMNPQRSTUVWXYZ` using `crypto.getRandomValues`. Create a random session ID such as `tv_<32 hex characters>`. In one Firestore batch, create the pending session and the code index:
    ```javascript
-   import { doc, setDoc } from 'firebase/firestore';
+   import { doc, Timestamp, writeBatch } from 'firebase/firestore';
 
-   await setDoc(doc(db, 'pairingSessions', 'K8N29X4F'), {
-     sessionId: 'K8N29X4F',
-     pairingCode: 'K8N29X4F',
-     deviceUid: 'lg_tv_living_room_01',
+   function generatePairingCode() {
+     const chars = '23456789ABCDEFGHJKMNPQRSTUVWXYZ';
+     let code = '';
+     while (code.length < 8) {
+       const bytes = new Uint8Array(16);
+       crypto.getRandomValues(bytes);
+       bytes.forEach((byte) => {
+         if (code.length < 8 && byte < 248) code += chars[byte % chars.length];
+       });
+     }
+     return code;
+   }
+
+   const sessionBytes = new Uint8Array(16);
+   crypto.getRandomValues(sessionBytes);
+   const sessionId = 'tv_' + Array.prototype.map.call(sessionBytes, (byte) =>
+     ('0' + byte.toString(16)).slice(-2)
+   ).join('');
+   const pairingCode = generatePairingCode();
+   const deviceUid = tvAuth.currentUser.uid;
+   const createdAt = new Date();
+   const expiresAt = new Date(createdAt.getTime() + 120000);
+   const batch = writeBatch(db);
+
+   batch.set(doc(db, 'pairingSessions', sessionId), {
+     pairingCode,
+     sessionId,
+     deviceUid,
      deviceName: 'LG OLED 65" (Living Room webOS)',
      status: 'pending',
-     createdAt: new Date().toISOString(),
-     expiresAt: new Date(Date.now() + 600000).toISOString() // 10 minutes
+     createdAt: createdAt.toISOString(),
+     expiresAt: expiresAt.toISOString(),
+     expiresAtMillis: expiresAt.getTime(),
+     expiresAtTimestamp: Timestamp.fromDate(expiresAt)
    });
+   batch.set(doc(db, 'pairingSessionCodes', pairingCode), {
+     sessionId,
+     deviceUid,
+     expiresAt: expiresAt.toISOString(),
+     expiresAtMillis: expiresAt.getTime(),
+     expiresAtTimestamp: Timestamp.fromDate(expiresAt)
+   });
+   await batch.commit();
    ```
+   Display `pairingCode` on the TV. The QR must contain `https://workoutbuddyconsole.web.app/?tab=pair&session=K8N29X4F` with the same code in its `session` parameter. Both QR and manual entry resolve to the same session document. The code expires after two minutes.
 
-2. **TV Listens for User Authorization**:
+2. **The Companion Web App Resolves the Code**:
+   Trim spaces/hyphens and uppercase the entered or scanned code. Read only `pairingSessionCodes/{pairingCode}`, fetch its `pairingSessions/{sessionId}` document, then verify the session's `pairingCode`, `deviceUid`, pending status, and expiration match the mapping. Do not query by device name or assume the code is the session document ID.
+
+3. **TV Listens for User Authorization**:
    ```javascript
    import { doc, onSnapshot } from 'firebase/firestore';
 
-   const unsub = onSnapshot(doc(db, 'pairingSessions', 'K8N29X4F'), (snap) => {
+   const unsub = onSnapshot(doc(db, 'pairingSessions', sessionId), (snap) => {
      const data = snap.data();
      if (data?.status === 'paired' && data?.userAccount) {
        // Save to webOS / TV local storage

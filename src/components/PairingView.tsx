@@ -49,7 +49,7 @@ export const PairingView: React.FC<PairingViewProps> = ({
 }) => {
   const { currentUser, userProfile, effectiveRole } = useAuth();
 
-  // Mode: 'code' (enter 8-digit ID) or 'qr' (scan QR code)
+  // Mode: 'code' (enter 8-character ID) or 'qr' (scan QR code)
   const [activeMode, setActiveMode] = useState<'code' | 'qr'>('code');
 
   const [pairingInput, setPairingInput] = useState('');
@@ -78,7 +78,7 @@ export const PairingView: React.FC<PairingViewProps> = ({
   const streamRef = useRef<MediaStream | null>(null);
   const animationFrameRef = useRef<number | null>(null);
 
-  // Format 8-digit pairing code e.g. "K8N2 - 9X4F"
+  // Format 8-character pairing code e.g. "K8N2 - 9X4F"
   const formatCodeDisplay = (val: string) => {
     if (val.length > 8 || val.toLowerCase().startsWith('tv_')) {
       return val;
@@ -155,7 +155,11 @@ export const PairingView: React.FC<PairingViewProps> = ({
   const fetchSession = async (codeOrId: string) => {
     const clean = codeOrId.trim().toUpperCase().replace(/[^A-Z0-9_]/g, '');
     if (!clean) {
-      setError('Please enter the 8-digit Pairing ID displayed on your TV screen.');
+      setError('Enter the 8-character Pairing ID displayed on your TV, or scan its QR code.');
+      return;
+    }
+    if (!/^[A-Z0-9]{8}$/.test(clean) && !/^TV_[A-Z0-9_-]{1,128}$/.test(clean)) {
+      setError('The Pairing ID must be 8 alphanumeric characters. You can also scan the TV QR code.');
       return;
     }
 
@@ -164,15 +168,16 @@ export const PairingView: React.FC<PairingViewProps> = ({
       setError(null);
       const s = await getPairingSession(clean);
       if (!s) {
-        setError(`Pairing ID "${clean}" not found. Please verify the 8-digit code shown on your TV.`);
+        setError(`Pairing ID "${clean}" not found. Check the TV code and expiry, and confirm both apps use the workoutbuddyweb project and its (default) Firestore database.`);
         setSession(null);
+      } else if (s.status !== 'pending') {
+        setSession(null);
+        setError(`This TV pairing session is ${s.status}. Refresh the code on the TV and try again.`);
+      } else if (!s.expiresAt || new Date(s.expiresAt).getTime() <= Date.now()) {
+        setSession(null);
+        setError('This TV pairing code has expired. Refresh the code on your TV and try again.');
       } else {
         setSession(s);
-        if (s.status === 'paired') {
-          setError('This TV has already been paired and logged in.');
-        } else if (s.status === 'expired' || new Date(s.expiresAt).getTime() < Date.now()) {
-          setError('This TV pairing code has expired. Please refresh the code on your TV.');
-        }
       }
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Error validating pairing session.');
@@ -316,7 +321,7 @@ export const PairingView: React.FC<PairingViewProps> = ({
       }
     } catch (err: unknown) {
       setCameraError(
-        'Unable to access camera. Please allow camera permissions in your browser or enter the 8-digit Pairing ID directly.'
+        '        Unable to access camera. Please allow camera permissions in your browser or enter the 8-character Pairing ID directly.'
       );
       setIsScanning(false);
     }
@@ -360,7 +365,7 @@ export const PairingView: React.FC<PairingViewProps> = ({
           setActiveMode('code');
           fetchSession(extractedCode);
         } else {
-          setError('No valid QR code detected in this photo. Please enter the 8-digit code directly.');
+          setError('No valid QR code detected in this photo. Please enter the 8-character code directly.');
         }
       };
       img.src = event.target?.result as string;
@@ -379,13 +384,13 @@ export const PairingView: React.FC<PairingViewProps> = ({
           Pair Your LG webOS TV
         </h1>
         <p className="text-xs sm:text-sm text-[#6E6C67] max-w-lg mx-auto">
-          Scan the QR code or enter the 8-digit Pairing ID displayed on your TV screen. The pairing ID permanently logs in the TV with your Workout Companion account.
+          Scan the QR code or enter the 8-character alphanumeric Pairing ID displayed on your TV screen. Both methods open the same pairing session.
         </p>
       </div>
 
       {/* Main Action Card */}
       <div className="bg-white border border-[#E6E4DF] rounded-xl p-6 sm:p-8 shadow-xs space-y-6">
-        {/* Method Toggle Tabs (Enter 8-digit ID vs Scan QR) */}
+        {/* Method Toggle Tabs (Enter 8-character ID vs Scan QR) */}
         {!success && !session && (
           <div className="flex bg-[#F3F1EC] p-1 rounded-xl">
             <button
@@ -401,7 +406,7 @@ export const PairingView: React.FC<PairingViewProps> = ({
               }`}
             >
               <KeyRound className="w-4 h-4 text-[#B45309]" />
-              <span>Enter 8-Digit Pairing ID</span>
+              <span>Enter 8-Character Pairing ID</span>
             </button>
 
             <button
@@ -650,17 +655,17 @@ export const PairingView: React.FC<PairingViewProps> = ({
                 }}
                 className="text-xs text-[#B45309] hover:underline cursor-pointer font-medium"
               >
-                Or enter 8-digit Pairing ID manually
+                Or enter the 8-character Pairing ID manually
               </button>
             </div>
           </div>
         ) : (
-          /* Option 1: 8-Digit Alphanumeric Code Input Form */
+          /* Option 1: 8-Character Alphanumeric Code Input Form */
           <div className="space-y-4 animate-in fade-in">
             <div>
               <div className="flex items-center justify-between mb-1.5">
                 <label className="text-xs font-semibold text-[#171615]">
-                  Enter 8-Digit Pairing ID
+                  Enter 8-Character Pairing ID
                 </label>
                 <span className="text-[11px] text-[#6E6C67]">
                   Displayed directly on your TV screen
@@ -682,7 +687,7 @@ export const PairingView: React.FC<PairingViewProps> = ({
                       }
                       setError(null);
                     }}
-                    placeholder="e.g. 23169630 or K8N2 - 9X4F"
+                    placeholder="e.g. K8N2 - 9X4F"
                     className="w-full px-4 py-2.5 text-base sm:text-lg font-mono font-bold tracking-widest text-[#171615] bg-[#FAFAF8] border border-[#D1CFCA] rounded-lg focus:outline-none focus:border-[#171615] uppercase text-center sm:text-left"
                   />
                   {pairingInput && (
@@ -708,7 +713,7 @@ export const PairingView: React.FC<PairingViewProps> = ({
 
               <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 text-[11px] text-[#9C9A94] mt-2">
                 <span>
-                  Accepts 8-digit codes (e.g. <span className="font-mono text-[#171615]">23169630</span> or <span className="font-mono text-[#171615]">K8N29X4F</span>) or TV session IDs.
+                  Enter the 8-character code shown on the TV. The QR code opens the same session automatically.
                 </span>
                 <button
                   type="button"
@@ -869,7 +874,7 @@ export const PairingView: React.FC<PairingViewProps> = ({
             <Tv className="w-8 h-8 mx-auto text-[#9C9A94]" />
             <p className="font-semibold text-[#171615]">No TVs logged into your account yet</p>
             <p className="max-w-xs mx-auto">
-              Scan the QR or enter the 8-digit Pairing ID shown on your LG TV to link it here.
+              Scan the QR or enter the 8-character alphanumeric Pairing ID shown on your LG TV to link it here.
             </p>
           </div>
         ) : (
@@ -938,10 +943,10 @@ export const PairingView: React.FC<PairingViewProps> = ({
       <div className="p-4 bg-white border border-[#E6E4DF] rounded-xl text-xs text-[#6E6C67] space-y-1.5 shadow-xs">
         <div className="font-semibold text-[#171615] flex items-center gap-1.5">
           <ShieldCheck className="w-4 h-4 text-[#B45309]" />
-          <span>Zero-Trust 8-Digit Pairing & Account Linking Architecture</span>
+          <span>Secure 8-Character Pairing & Account Linking</span>
         </div>
         <p className="leading-relaxed">
-          The 8-digit alphanumeric pairing handshake transfers authenticated user credentials directly to the TV client via an atomic transaction, registering the hardware under <code className="font-mono text-[#171615]">users/&#123;uid&#125;/pairedDevices</code>. This permanently authorizes the TV to stream user routines and schedules while preventing session hijacking or unauthorized access.
+          The 8-character alphanumeric pairing code and the QR code resolve to the same pending Firestore session. After you approve pairing, an atomic transaction links the TV under <code className="font-mono text-[#171615]">users/&#123;uid&#125;/pairedDevices</code>.
         </p>
       </div>
     </div>

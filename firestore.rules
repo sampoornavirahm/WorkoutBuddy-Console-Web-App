@@ -111,7 +111,7 @@ service cloud.firestore {
       let mapping = incoming();
       let sessionPath = /databases/$(database)/documents/pairingSessions/$(mapping.sessionId);
       return isSignedIn() &&
-        pairingCode.matches('^[0-9]{8}$') &&
+        pairingCode.matches('^[23456789ABCDEFGHJKMNPQRSTUVWXYZ]{8}$') &&
         mapping.keys().hasOnly(['sessionId', 'deviceUid', 'expiresAt', 'expiresAtMillis', 'expiresAtTimestamp']) &&
         mapping.sessionId is string &&
         isValidId(mapping.sessionId) &&
@@ -183,8 +183,9 @@ service cloud.firestore {
       allow delete: if isAdmin();
     }
 
-    // 4b. Numeric pairing-code index, created atomically with its session.
+    // 4b. Alphanumeric pairing-code index, created atomically with its session.
     match /pairingSessionCodes/{pairingCode} {
+      allow get: if pairingCode.matches('^[23456789ABCDEFGHJKMNPQRSTUVWXYZ]{8}$');
       allow create: if isValidPairingSessionCode(pairingCode);
       allow update: if existing().expiresAtMillis <= request.time.toMillis() &&
         isValidPairingSessionCode(pairingCode);

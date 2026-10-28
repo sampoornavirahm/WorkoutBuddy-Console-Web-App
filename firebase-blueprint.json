@@ -47,7 +47,7 @@
       "type": "object",
       "properties": {
         "sessionId": { "type": "string", "description": "One-time session ID" },
-        "pairingCode": { "type": "string", "maxLength": 16, "description": "8-digit alphanumeric pairing code" },
+        "pairingCode": { "type": "string", "minLength": 8, "maxLength": 8, "description": "8-character uppercase alphanumeric code from the unambiguous TV pairing alphabet" },
         "deviceUid": { "type": "string", "description": "TV device anonymous UID or hardware ID" },
         "deviceName": { "type": "string", "maxLength": 80, "description": "TV device display name" },
         "status": { "type": "string", "enum": ["pending", "paired", "expired", "revoked"], "description": "Session status" },

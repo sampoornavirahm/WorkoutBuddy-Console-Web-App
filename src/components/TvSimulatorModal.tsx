@@ -88,7 +88,7 @@ export const TvSimulatorModal: React.FC<TvSimulatorModalProps> = ({
     }
   }, []);
 
-  // Initialize TV pairing handshake session with 8-digit alphanumeric code
+  // Initialize TV pairing handshake session with an 8-character alphanumeric code
   const initializeNewTvSession = useCallback(async () => {
     try {
       setLoadingSession(true);
@@ -354,14 +354,14 @@ export const TvSimulatorModal: React.FC<TvSimulatorModalProps> = ({
                 </span>
               </div>
 
-              {/* Instructions & 8-Digit Code Display */}
+              {/* Instructions & 8-Character Code Display */}
               <div className="max-w-md space-y-4 text-left">
                 <div>
                   <h3 className="text-xl sm:text-2xl font-bold tracking-tight text-white">
                     {tvAccount ? 'Manage Paired Account' : 'Log In to this LG TV'}
                   </h3>
                   <p className="text-xs text-neutral-400 mt-1 leading-relaxed">
-                    Scan the QR code or enter the 8-digit Pairing ID on your phone or computer. The Pairing ID logs in this TV directly with your Workout Companion user account.
+                    Scan the QR code or enter the 8-character alphanumeric Pairing ID on your phone or computer. Both resolve to this TV's pairing session.
                   </p>
                 </div>
 
@@ -397,11 +397,11 @@ export const TvSimulatorModal: React.FC<TvSimulatorModalProps> = ({
                     </div>
                   </div>
                 ) : (
-                  /* Prominent 8-Digit Pairing Code Display */
+                  /* Prominent 8-Character Pairing Code Display */
                   <div className="space-y-3">
                     <div className="p-4 bg-neutral-900 border-2 border-[#B45309] rounded-xl space-y-2">
                       <div className="flex items-center justify-between text-xs text-[#F59E0B] font-semibold uppercase tracking-wider">
-                        <span>8-Digit Pairing ID</span>
+                        <span>8-Character Pairing ID</span>
                         <span className="text-[11px] font-normal text-neutral-400 lowercase">
                           case-insensitive
                         </span>
@@ -415,7 +415,7 @@ export const TvSimulatorModal: React.FC<TvSimulatorModalProps> = ({
                           type="button"
                           onClick={handleCopyCode}
                           className="inline-flex items-center gap-1 px-3 py-1.5 bg-neutral-800 hover:bg-neutral-700 text-neutral-200 text-xs font-medium rounded transition-colors cursor-pointer"
-                          title="Copy 8-digit pairing code"
+                          title="Copy 8-character pairing code"
                         >
                           {copiedCode ? (
                             <>

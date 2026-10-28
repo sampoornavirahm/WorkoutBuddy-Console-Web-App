@@ -6,7 +6,7 @@
  * Backend: Firebase Firestore (Project: "workoutbuddyweb", Database: "(default)")
  * 
  * This file demonstrates how your Smart TV application can:
- *  1. Generate an 8-digit pairing code and start the pairing handshake
+ *  1. Generate an 8-character alphanumeric pairing code and start the pairing handshake
  *  2. Listen for real-time claim from the web app & permanently log in the user
  *  3. Query published exercise libraries and user workout routines
  *  4. Update TV heartbeat & real-time playback state in Firestore
@@ -17,8 +17,10 @@
  */
 
 import { initializeApp } from 'firebase/app';
+import { getAuth, signInAnonymously } from 'firebase/auth';
 import {
   getFirestore,
+  Timestamp,
   doc,
   setDoc,
   getDoc,
@@ -30,7 +32,7 @@ import {
   orderBy,
   limit,
   onSnapshot,
-  serverTimestamp
+  writeBatch
 } from 'firebase/firestore';
 
 // ----------------------------------------------------------------------------
@@ -47,6 +49,7 @@ export const firebaseTvConfig = {
 
 // Initialize Firebase App
 const app = initializeApp(firebaseTvConfig);
+const auth = getAuth(app);
 
 // Connect strictly to the standard (default) Firestore database
 export const db = getFirestore(app);
@@ -64,7 +67,9 @@ export const TV_STORAGE = {
  * Returns or generates a persistent hardware UID for this Smart TV.
  */
 export function getOrCreateTvDeviceId() {
-  let uid = localStorage.getItem(TV_STORAGE.DEVICE_UID);
+  let uid = auth.currentUser && auth.currentUser.isAnonymous
+    ? auth.currentUser.uid
+    : localStorage.getItem(TV_STORAGE.DEVICE_UID);
   if (!uid) {
     // Generate unique TV client identifier (e.g. lg_tv_9x4fk2)
     uid = 'tv_' + Math.random().toString(36).substring(2, 10) + '_' + Date.now().toString(36);
@@ -88,16 +93,35 @@ export function getTvAuthenticatedUser() {
 }
 
 /**
- * Generates an 8-character uppercase alphanumeric pairing code.
- * Excludes confusing characters (0, O, 1, I).
+ * Generates an 8-character uppercase alphanumeric code without ambiguous characters.
  */
 export function generate8DigitPairingCode() {
-  const chars = '23456789ABCDEFGHJKLMNPQRSTUVWXYZ';
+  const chars = '23456789ABCDEFGHJKMNPQRSTUVWXYZ';
   let result = '';
-  for (let i = 0; i < 8; i++) {
-    result += chars.charAt(Math.floor(Math.random() * chars.length));
+  if (!globalThis.crypto?.getRandomValues) {
+    throw new Error('Secure pairing code generation is unavailable in this browser.');
+  }
+  while (result.length < 8) {
+    const bytes = new Uint8Array(16);
+    globalThis.crypto.getRandomValues(bytes);
+    bytes.forEach((byte) => {
+      if (result.length < 8 && byte < 248) {
+        result += chars.charAt(byte % chars.length);
+      }
+    });
   }
   return result;
+}
+
+function generateSessionId() {
+  if (!globalThis.crypto?.getRandomValues) {
+    throw new Error('Secure TV session generation is unavailable in this browser.');
+  }
+  const bytes = new Uint8Array(16);
+  globalThis.crypto.getRandomValues(bytes);
+  return 'tv_' + Array.prototype.map.call(bytes, (byte) =>
+    ('0' + byte.toString(16)).slice(-2)
+  ).join('');
 }
 
 // ----------------------------------------------------------------------------
@@ -105,20 +129,27 @@ export function generate8DigitPairingCode() {
 // ----------------------------------------------------------------------------
 
 /**
- * Initiates a new 8-digit Pairing Session from the TV app.
- * Creates a pending session document at /pairingSessions/{8-digit-code}.
+ * Initiates a new 8-character alphanumeric Pairing Session from the TV app.
+ * Creates a session and code-index document atomically.
  * 
  * @param {string} tvModelName - e.g. 'LG OLED 65" (webOS)'
  * @returns {Promise<{ pairingCode: string, sessionId: string, pairingUrl: string }>}
  */
 export async function createTvPairingSession(tvModelName = 'LG Smart TV') {
-  const deviceUid = getOrCreateTvDeviceId();
+  let tvUser = auth.currentUser;
+  if (!tvUser || !tvUser.isAnonymous) {
+    if (tvUser) await auth.signOut();
+    tvUser = (await signInAnonymously(auth)).user;
+  }
+  const deviceUid = tvUser.uid;
+  localStorage.setItem(TV_STORAGE.DEVICE_UID, deviceUid);
   const pairingCode = generate8DigitPairingCode();
+  const sessionId = generateSessionId();
   const now = new Date();
-  const expiresAt = new Date(now.getTime() + 10 * 60 * 1000); // 10 minutes valid
+  const expiresAt = new Date(now.getTime() + 2 * 60 * 1000);
 
   const sessionPayload = {
-    sessionId: pairingCode,
+    sessionId: sessionId,
     pairingCode: pairingCode,
     deviceUid: deviceUid,
     deviceName: tvModelName,
@@ -127,16 +158,26 @@ export async function createTvPairingSession(tvModelName = 'LG Smart TV') {
     expiresAt: expiresAt.toISOString()
   };
 
-  // Write directly using the 8-digit code as the document ID
-  const sessionDocRef = doc(db, 'pairingSessions', pairingCode);
-  await setDoc(sessionDocRef, sessionPayload);
+  const batch = writeBatch(db);
+  batch.set(doc(db, 'pairingSessions', sessionId), {
+    ...sessionPayload,
+    expiresAtMillis: expiresAt.getTime(),
+    expiresAtTimestamp: Timestamp.fromDate(expiresAt)
+  });
+  batch.set(doc(db, 'pairingSessionCodes', pairingCode), {
+    sessionId,
+    deviceUid,
+    expiresAt: expiresAt.toISOString(),
+    expiresAtMillis: expiresAt.getTime(),
+    expiresAtTimestamp: Timestamp.fromDate(expiresAt)
+  });
+  await batch.commit();
 
-  // Deep-link / QR URL that directs phone camera directly to pairing tab
-  const pairingUrl = `https://workoutbuddyweb.web.app/?tab=pair&session=${pairingCode}`;
+  const pairingUrl = `https://workoutbuddyconsole.web.app/?tab=pair&session=${encodeURIComponent(pairingCode)}`;
 
   return {
     pairingCode,
-    sessionId: pairingCode,
+    sessionId,
     pairingUrl,
     expiresAt
   };
@@ -144,16 +185,16 @@ export async function createTvPairingSession(tvModelName = 'LG Smart TV') {
 
 /**
  * Starts a real-time listener on the TV for pairing verification.
- * When the user enters the 8-digit ID or scans the QR on mobile, the web app writes
- * the user's account info into the pairingSession doc and status changes to 'paired'.
+ * When the user enters the code or scans the QR, the web app resolves the index
+ * and updates the referenced pairing session to 'paired'.
  * 
- * @param {string} pairingCode - The 8-digit pairing code
+ * @param {string} sessionId - Session document ID returned from createTvPairingSession
  * @param {Function} onPaired - Callback receiving user account { uid, email, displayName, photoURL, role }
  * @param {Function} onExpired - Callback when code has expired
  * @returns {Function} Unsubscribe function to stop listening
  */
-export function listenForPairingCompletion(pairingCode, onPaired, onExpired) {
-  const sessionRef = doc(db, 'pairingSessions', pairingCode);
+export function listenForPairingCompletion(sessionId, onPaired, onExpired) {
+  const sessionRef = doc(db, 'pairingSessions', sessionId);
 
   const unsubscribe = onSnapshot(sessionRef, (snapshot) => {
     if (!snapshot.exists()) return;
@@ -392,12 +433,12 @@ export async function recordCompletedWorkout(routineId, routineName, durationSec
       // TV not yet logged in -> show Pairing Screen
       const session = await createTvPairingSession('LG OLED 65" TV');
 
-      // Display 8-digit code (e.g. "K8N2 - 9X4F") and render QR Code for session.pairingUrl
+      // Display 8-character code (e.g. "K8N2 - 9X4F") and render QR Code for session.pairingUrl
       renderPairingScreen(session.pairingCode, session.pairingUrl);
 
       // Wait for user to verify on phone
       listenForPairingCompletion(
-        session.pairingCode,
+        session.sessionId,
         (userAccount) => {
           console.log('Handshake verified! Logged in as:', userAccount.email);
           showTvHomeScreen(userAccount);

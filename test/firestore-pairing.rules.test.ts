@@ -31,7 +31,7 @@ describe('TV pairing Firestore rules', () => {
 
   it('allows an authenticated TV to atomically create its session and code', async () => {
     const deviceUid = 'tv_anonymous_uid';
-    const pairingCode = '12345678';
+    const pairingCode = 'K8N29X4F';
     const sessionId = 'tv_0123456789abcdef0123456789abcdef';
     const now = new Date();
     const expiresAt = new Date(now.getTime() + 120000);
@@ -61,6 +61,13 @@ describe('TV pairing Firestore rules', () => {
     const session = await assertSucceeds(getDoc(doc(db, 'pairingSessions', sessionId)));
     assert.equal(session.data()?.deviceUid, deviceUid);
     assert.equal(session.data()?.pairingCode, pairingCode);
+    const codeIndex = await assertSucceeds(
+      getDoc(doc(testEnv.authenticatedContext('phone_user').firestore(), 'pairingSessionCodes', pairingCode))
+    );
+    assert.equal(codeIndex.data()?.sessionId, sessionId);
+    await assertFails(
+      getDoc(doc(testEnv.authenticatedContext('phone_user').firestore(), 'pairingSessionCodes', '12345678'))
+    );
   });
 
   it('does not allow an unauthenticated client to create a pairing session', async () => {
@@ -71,7 +78,7 @@ describe('TV pairing Firestore rules', () => {
       writeBatch(db)
         .set(doc(db, 'pairingSessions', 'tv_0123456789abcdef0123456789abcdef'), {
           sessionId: 'tv_0123456789abcdef0123456789abcdef',
-          pairingCode: '12345678',
+          pairingCode: 'K8N29X4F',
           deviceUid: 'tv_anonymous_uid',
           deviceName: 'Workout Buddy webOS TV',
           status: 'pending',
@@ -86,7 +93,7 @@ describe('TV pairing Firestore rules', () => {
 
   it('rejects a pairing-code mapping that does not match its session', async () => {
     const deviceUid = 'tv_anonymous_uid';
-    const pairingCode = '12345678';
+    const pairingCode = 'K8N29X4F';
     const sessionId = 'tv_0123456789abcdef0123456789abcdef';
     const now = new Date();
     const expiresAt = new Date(now.getTime() + 120000);
@@ -104,7 +111,7 @@ describe('TV pairing Firestore rules', () => {
       expiresAtMillis: expiresAt.getTime(),
       expiresAtTimestamp: Timestamp.fromDate(expiresAt)
     });
-    batch.set(doc(db, 'pairingSessionCodes', '87654321'), {
+    batch.set(doc(db, 'pairingSessionCodes', 'K8N29X5G'), {
       sessionId,
       deviceUid,
       expiresAt: expiresAt.toISOString(),

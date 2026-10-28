@@ -137,13 +137,22 @@ export async function removePairedDevice(uid: string, deviceUid: string): Promis
   }
 }
 
-// --- 8-Digit Alphanumeric QR & Pairing Handshake ---
+// --- 8-Character Alphanumeric QR & Pairing Handshake ---
 export function generatePairingCode(): string {
-  // 8 uppercase alphanumeric chars, avoiding ambiguous chars like 0/O, 1/I/L
-  const chars = '23456789ABCDEFGHJKLMNPQRSTUVWXYZ';
+  // Avoid ambiguous characters such as 0/O and 1/I/L.
+  const chars = '23456789ABCDEFGHJKMNPQRSTUVWXYZ';
   let code = '';
-  for (let i = 0; i < 8; i++) {
-    code += chars.charAt(Math.floor(Math.random() * chars.length));
+  if (!globalThis.crypto?.getRandomValues) {
+    throw new Error('Secure pairing code generation is unavailable in this browser.');
+  }
+  while (code.length < 8) {
+    const bytes = new Uint8Array(16);
+    globalThis.crypto.getRandomValues(bytes);
+    bytes.forEach((byte) => {
+      if (code.length < 8 && byte < 248) {
+        code += chars.charAt(byte % chars.length);
+      }
+    });
   }
   return code;
 }
@@ -153,7 +162,7 @@ export async function createPairingSession(
   customDeviceUid?: string
 ): Promise<PairingSession> {
   const pairingCode = generatePairingCode();
-  const sessionId = pairingCode; // 8-digit alphanumeric document ID
+  const sessionId = pairingCode;
   const deviceUid = customDeviceUid || 'dev_' + Math.random().toString(36).substring(2, 12);
   const now = new Date();
   const expiresAt = new Date(now.getTime() + 10 * 60 * 1000); // 10 minutes for convenient pairing
@@ -186,17 +195,50 @@ export async function getPairingSession(codeOrSessionId: string): Promise<Pairin
   const cleanUpper = clean.toUpperCase();
   const cleanLower = clean.toLowerCase();
 
-  // Helper to extract session data guaranteeing correct document ID
-  const parseSessionSnap = (snap: { id: string; data: () => any }): PairingSession => {
+  const parseSessionSnap = (snap: { id: string; data: () => Record<string, unknown> }): PairingSession => {
     const data = snap.data();
     return {
       ...data,
-      sessionId: snap.id, // Ensure document key is preserved for transactions
+      sessionId: snap.id,
       pairingCode: String(data.pairingCode || data.sessionId || snap.id),
-    };
+    } as PairingSession;
   };
 
-  // 1. Direct getDoc by exact, uppercase, or lowercase doc ID
+  // New TV sessions use a random session document ID and a separate code index.
+  if (/^[A-Z0-9]{8}$/.test(cleanUpper)) {
+    let codeIndex: Record<string, unknown> | null = null;
+    try {
+      const indexSnap = await getDoc(doc(db, 'pairingSessionCodes', cleanUpper));
+      if (indexSnap.exists()) codeIndex = indexSnap.data();
+    } catch (error) {
+      console.warn('Could not read the pairing-code index; trying compatible session lookups.', error);
+    }
+
+    if (codeIndex) {
+      if (
+        typeof codeIndex.sessionId !== 'string' ||
+        typeof codeIndex.deviceUid !== 'string' ||
+        typeof codeIndex.expiresAt !== 'string'
+      ) {
+        throw new Error('The pairing-code index is incomplete. Refresh the code on your TV.');
+      }
+      const indexedSession = await getDoc(doc(db, 'pairingSessions', codeIndex.sessionId));
+      if (!indexedSession.exists()) {
+        throw new Error('The pairing code points to a missing TV session. Refresh the code on your TV.');
+      }
+      const resolved = parseSessionSnap(indexedSession);
+      if (
+        resolved.pairingCode.toUpperCase() !== cleanUpper ||
+        resolved.deviceUid !== codeIndex.deviceUid ||
+        resolved.expiresAt !== codeIndex.expiresAt
+      ) {
+        throw new Error('The pairing code does not match the TV session. Refresh the code on your TV.');
+      }
+      return resolved;
+    }
+  }
+
+  // Legacy sessions and simulator sessions use the pairing code as their document ID.
   for (const candidateId of [clean, cleanUpper, cleanLower]) {
     try {
       const snap = await getDoc(doc(db, 'pairingSessions', candidateId));
@@ -208,7 +250,7 @@ export async function getPairingSession(codeOrSessionId: string): Promise<Pairin
     }
   }
 
-  // 2. Query by pairingCode field (string uppercase, string as-is, or numeric)
+  // Compatible lookup for sessions created before the code-index format.
   try {
     const q1 = query(collection(db, 'pairingSessions'), where('pairingCode', '==', cleanUpper));
     const snap1 = await getDocs(q1);
@@ -281,7 +323,7 @@ export async function claimPairingSession(
 ): Promise<{ pairedDevice: PairedDevice; session: PairingSession }> {
   const session = await getPairingSession(codeOrSessionId);
   if (!session) {
-    throw new Error('Pairing session not found. Please check the 8-digit pairing ID.');
+    throw new Error('Pairing session not found. Please check the 8-character pairing ID.');
   }
 
   const sessionRef = doc(db, 'pairingSessions', session.sessionId);

@@ -140,7 +140,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ pendingPairingSessionId 
                 Your unified fitness hub for Web & Smart TV
               </h1>
               <p className="text-sm text-[#6E6C67] leading-relaxed">
-                Log in to build workout routines, browse 1,300+ animated exercise demonstrations, and pair your LG webOS Smart TV with an 8-digit verification code.
+                Log in to build workout routines, browse 1,300+ animated exercise demonstrations, and pair your LG webOS Smart TV with an 8-character alphanumeric verification code.
               </p>
             </div>
 
@@ -165,7 +165,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ pendingPairingSessionId 
                 <div>
                   <h3 className="text-xs font-bold text-[#171615]">Direct LG webOS TV Sync</h3>
                   <p className="text-[11px] text-[#6E6C67] mt-0.5 leading-normal">
-                    Pair your big screen using an 8-digit code or camera QR scanner to stream workouts seamlessly.
+                    Pair your big screen using its 8-character alphanumeric code or QR scanner to stream workouts seamlessly.
                   </p>
                 </div>
               </div>

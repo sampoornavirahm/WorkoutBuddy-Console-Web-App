@@ -35,6 +35,7 @@ Built strictly within **Firebase Spark Free-Tier** constraints:
 │  ├── userRoles/{uid}                     (Admin write, Owner read)     │
 │  ├── users/{uid}/pairedDevices/{devUid}  (Owner revoke, TV device get) │
 │  ├── pairingSessions/{sessionId}         (Atomic 2-min claim)          │
+│  ├── pairingSessionCodes/{code}          (8-char code → session map)  │
 │  ├── exercises/{exerciseId}              (Public read, Admin manage)   │
 │  ├── routines/{routineId}                (Public/Owner read, Pro edit) │
 │  ├── banners/{bannerId}                  (TV/Public read, Admin edit)  │
@@ -193,12 +194,18 @@ The application will be hosted at `https://workoutbuddyconsole.web.app` (or `htt
 
 ## LG webOS TV Companion Integration
 
-### QR Pairing Flow (`/pair?session=...`)
-1. The physical LG webOS TV displays a QR code containing `https://<app-domain>/pair?session=<SESSION_ID>`.
-2. The user scans the QR code with their phone.
-3. The web manager verifies the 2-minute expiration countdown and shows the TV hardware label.
-4. Clicking **Authorize & Link This TV** executes an atomic Firestore transaction claiming the pending session and recording the TV hardware ID under `users/{uid}/pairedDevices/{deviceUid}`.
-5. The TV listens to `pairingSessions/{sessionId}` via real-time snapshot and immediately transitions to the workout home screen.
+### Pairing ID and QR contract
+
+The TV creates the session. Both clients must use Firebase project `workoutbuddyweb` and the `(default)` Firestore database.
+
+1. Generate an 8-character uppercase code using `23456789ABCDEFGHJKMNPQRSTUVWXYZ` (ambiguous `0`, `1`, `I`, `L`, and `O` are omitted). Use `crypto.getRandomValues`; do not use `Math.random`.
+2. Create a unique `pairingSessions/{sessionId}` document with `sessionId`, the exact `pairingCode`, the TV's authenticated anonymous `deviceUid`, `deviceName`, `status: "pending"`, and `createdAt` / `expiresAt`. The physical TV code expires after 120 seconds.
+3. In the same Firestore batch, create `pairingSessionCodes/{PAIRING_CODE}` with the matching `sessionId`, `deviceUid`, and expiration fields. The mapping and session must agree exactly; the deployed rules validate this atomically and allow only a single-document `get` of a valid code, not code-index listing.
+4. Display this exact code on the TV. Generate the QR URL as `https://workoutbuddyconsole.web.app/?tab=pair&session={PAIRING_CODE}` (URL-encode the code). Do not put a different code, session document ID, or device UID in the QR URL.
+5. In the web app, uppercase the entered/scanned value, remove visual spaces or hyphens, read `pairingSessionCodes/{PAIRING_CODE}`, fetch the referenced session, then verify its `pairingCode`, `deviceUid`, pending status, and expiration before showing the approval screen. QR scan and manual entry must resolve to the same `sessionId`.
+6. On approval, atomically change that session from pending to paired and create `users/{uid}/pairedDevices/{deviceUid}`. The TV listens to the session document and proceeds only when it observes the paired state.
+
+If pairing fails, compare the code displayed on the TV with the QR URL's `session` value, then inspect the two Firestore documents above. Confirm the mapping points to the same session and TV UID, the session is still pending and unexpired, both apps use the same project/database, TV Anonymous Authentication is enabled, and the latest Firestore rules have been deployed. Do not query or guess session IDs from the code; resolve the code through its mapping.
 
 ### Built-in LG TV Emulator
 Click **TV Simulator** in the top navigation bar to launch the interactive 16:9 LG webOS emulator. You can test QR code generation, countdown expiration, and live synchronization without needing physical hardware.
